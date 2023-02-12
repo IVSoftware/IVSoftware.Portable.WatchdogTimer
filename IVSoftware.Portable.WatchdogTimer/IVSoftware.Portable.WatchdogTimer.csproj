@@ -12,7 +12,7 @@
 	  <Owner>IVSoftware LLC</Owner>
 	  <Copyright>Copyright © 2023 IVSoftware LLC</Copyright>
 	  <SignAssembly>true</SignAssembly>
-	  <AssemblyOriginatorKeyFile>ivsoftware-nuget.pfx</AssemblyOriginatorKeyFile>
+	  <AssemblyOriginatorKeyFile>E:\one-drive-microsoft-musicphrenia\OneDrive\IVSoftware Admin\Certificates PFX\ivsoftware-nuget-portable.pfx</AssemblyOriginatorKeyFile>
 	  <AssemblyVersion>1.0.4.0</AssemblyVersion>
 	  <FileVersion>$(AssemblyVersion)</FileVersion>
 	  <Version>$(AssemblyVersion)</Version>
