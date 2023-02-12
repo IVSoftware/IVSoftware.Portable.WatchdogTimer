@@ -18,6 +18,7 @@
 	  <Version>$(AssemblyVersion)</Version>
 	  <PackageProjectUrl>https://github.com/IVSoftware/IVSoftware.WinForms.HitTestTableLayoutPanel.git</PackageProjectUrl>
 	  <PackageReadmeFile>README.md</PackageReadmeFile>
+	  <PackageTags>timer;watchdog;portable;net;android;ios</PackageTags>
   </PropertyGroup>
 
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
