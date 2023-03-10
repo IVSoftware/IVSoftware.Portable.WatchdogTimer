@@ -20,6 +20,8 @@
 	  <PackageReadmeFile>README.md</PackageReadmeFile>
 	  <PackageTags>timer;watchdog;portable;net;android;ios</PackageTags>
 	  <IncludeSymbols>False</IncludeSymbols>
+	  <PackageLicenseExpression>MIT License</PackageLicenseExpression>
+	  <PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
   </PropertyGroup>
 
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
