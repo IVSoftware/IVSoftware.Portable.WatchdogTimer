@@ -25,9 +25,9 @@ namespace testbench
             Stopwatch _stopWatch = new Stopwatch();
 
             #region T E S T    A C T I O N
-            Console.WriteLine("T E S T    E V E N T");
+            Console.WriteLine("T E S T    A C T I O N");
             _stopWatch.Start();
-            Console.WriteLine(_stopWatch.Elapsed);
+            Console.WriteLine($"{_stopWatch.Elapsed} START");
 
             _wdt.StartOrRestart(()=> MarkEmailAsRead(id: 1));
             await Task.Delay(TimeSpan.FromSeconds(1));
@@ -54,15 +54,51 @@ namespace testbench
             // Should run to completion
             await Task.Delay(TimeSpan.FromSeconds(4));
             Console.WriteLine(_stopWatch.Elapsed + Environment.NewLine);
-
             #endregion T E S T    A C T I O N
+
+            #region T E S T    C A N C E L
+            Console.WriteLine("T E S T    C A N C E L");
+
+            _stopWatch.Restart();
+            Console.WriteLine($"{_stopWatch.Elapsed} START");
+
+            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 1), new CustomEventArgs(id: 1));
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            Console.WriteLine(_stopWatch.Elapsed);
+
+            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 2), new CustomEventArgs(id: 2));
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            Console.WriteLine(_stopWatch.Elapsed);
+
+            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 3), new CustomEventArgs(id: 3));
+            // Cancel event and allow enough time to otherwise complete.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            _wdt.Cancel();
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Console.WriteLine(_stopWatch.Elapsed + Environment.NewLine);
+
+            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 10), new CustomEventArgs(id: 10));
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Console.WriteLine(_stopWatch.Elapsed);
+
+            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 20), new CustomEventArgs(id: 20));
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            Console.WriteLine(_stopWatch.Elapsed);
+
+            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 30), new CustomEventArgs(id: 30));
+            // Cancel event and allow enough time to otherwise complete.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            _wdt.Cancel();
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Console.WriteLine(_stopWatch.Elapsed + Environment.NewLine);
+            #endregion T E S T    C A N C E L
 
             #region T E S T    E V E N T
             _wdt.RanToCompletion += onWdtRanToCompletion;
 
-            Console.WriteLine("T E S T    A C T I O N");
+            Console.WriteLine("T E S T    E V E N T");
             _stopWatch.Restart();
-            Console.WriteLine(_stopWatch.Elapsed);
+            Console.WriteLine($"{_stopWatch.Elapsed} START");
 
             _wdt.StartOrRestart(new CustomEventArgs(id: 1));
             await Task.Delay(TimeSpan.FromSeconds(1));
@@ -91,45 +127,8 @@ namespace testbench
             // Should run to completion
             await Task.Delay(TimeSpan.FromSeconds(4));
             Console.WriteLine(_stopWatch.Elapsed + Environment.NewLine);
+            Console.WriteLine($"DONE {_stopWatch.Elapsed}");
             #endregion T E S T    E V E N T
-
-            #region T E S T    C A N C E L
-            Console.WriteLine("T E S T    C A N C E L");
-            _wdt.RanToCompletion += onWdtRanToCompletion;
-
-            _stopWatch.Restart();
-            Console.WriteLine(_stopWatch.Elapsed);
-
-            _wdt.StartOrRestart(()=>MarkEmailAsRead(id: 1), new CustomEventArgs(id: 1));
-            await Task.Delay(TimeSpan.FromSeconds(1));
-            Console.WriteLine(_stopWatch.Elapsed);
-
-            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 2), new CustomEventArgs(id: 2));
-            await Task.Delay(TimeSpan.FromSeconds(1));
-            Console.WriteLine(_stopWatch.Elapsed);
-
-            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 3), new CustomEventArgs(id: 3));
-            // Cancel event and allow enough time to otherwise complete.
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            _wdt.Cancel();
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            Console.WriteLine(_stopWatch.Elapsed + Environment.NewLine);
-
-            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 10), new CustomEventArgs(id: 10));
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            Console.WriteLine(_stopWatch.Elapsed);
-
-            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 20), new CustomEventArgs(id: 20));
-            await Task.Delay(TimeSpan.FromSeconds(1));
-            Console.WriteLine(_stopWatch.Elapsed);
-
-            _wdt.StartOrRestart(() => MarkEmailAsRead(id: 30), new CustomEventArgs(id: 30));
-            // Cancel event and allow enough time to otherwise complete.
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            _wdt.Cancel();
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            Console.WriteLine($"DONE {_stopWatch.Elapsed}" );
-            #endregion T E S T    A C T I O N
 
 
             #region L o c a l F x

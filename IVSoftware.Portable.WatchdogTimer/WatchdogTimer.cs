@@ -6,12 +6,14 @@ namespace IVSoftware.Portable
     public class WatchdogTimer
     {
         int _wdtCount = 0;
+        bool _isCancelled = false;
         public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(1);
         public void StartOrRestart(Action action, EventArgs e)
         {
             Running = true;
             _wdtCount++;
             var capturedCount = _wdtCount;
+            _isCancelled= false;
             Task
                 .Delay(Interval)
                 .GetAwaiter()
@@ -19,7 +21,7 @@ namespace IVSoftware.Portable
                 {
                     // If the 'captured' localCount has not changed after awaiting the Interval, 
                     // it indicates that no new 'bones' have been thrown during that interval.        
-                    if (capturedCount.Equals(_wdtCount))
+                    if (capturedCount.Equals(_wdtCount) && !_isCancelled)
                     {
                         action?.Invoke();
                         Running = false;
@@ -34,7 +36,7 @@ namespace IVSoftware.Portable
         
         // By decrementing without capturing, the condition
         // capturedCount.Equals(_wdtCount) evaluated to false.
-        public void Cancel() => _wdtCount = -1;
+        public void Cancel() => _isCancelled = true;
         public bool Running { get; private set; }
         public event EventHandler RanToCompletion;
     }
