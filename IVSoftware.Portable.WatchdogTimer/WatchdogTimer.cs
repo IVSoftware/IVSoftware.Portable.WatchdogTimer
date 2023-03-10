@@ -7,7 +7,7 @@ namespace IVSoftware.Portable
     {
         int _wdtCount = 0;
         public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(1);
-        public void StartOrRestart(Action action = null)
+        public void StartOrRestart(Action action, EventArgs e)
         {
             Running = true;
             _wdtCount++;
@@ -23,10 +23,18 @@ namespace IVSoftware.Portable
                     {
                         action?.Invoke();
                         Running = false;
-                        RanToCompletion?.Invoke(this, EventArgs.Empty);
+                        RanToCompletion?.Invoke(this, e ?? EventArgs.Empty);
                     }
                 });
         }
+
+        public void StartOrRestart() => StartOrRestart(null, EventArgs.Empty);
+        public void StartOrRestart(Action action) => StartOrRestart(action, EventArgs.Empty);
+        public void StartOrRestart(EventArgs e) => StartOrRestart(null, e);
+        
+        // By decrementing without capturing, the condition
+        // capturedCount.Equals(_wdtCount) evaluated to false.
+        public void Cancel() => _wdtCount = -1;
         public bool Running { get; private set; }
         public event EventHandler RanToCompletion;
     }
