@@ -4,7 +4,7 @@
 		<VersionPrefix>1.2.1.0</VersionPrefix>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<Title>IVSoftware.Portable.WatchdogTimer</Title>
-		<Description>Flexible watchdog timer implementation eliminates exceptions for canceled Tasks.</Description>	  
+		<Description>Flexible watchdog timer implementation eliminates exceptions for canceled Tasks.</Description>
 		<RootNamespace>IVSoftware.Portable</RootNamespace>
 		<GeneratePackageOnBuild>False</GeneratePackageOnBuild>
 		<Authors>IVSoftware, Thomas C. Gregor</Authors>
@@ -19,14 +19,12 @@
 		<IncludeSymbols>True</IncludeSymbols>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+		<AssemblyOriginatorKeyFile>231107.ivs.pfx</AssemblyOriginatorKeyFile>
 	</PropertyGroup>
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-		<Exec Command="call nuget-publish.bat" />
-	</Target>
 	<ItemGroup>
 		<None Include="..\README.md">
-		<Pack>True</Pack>
-		<PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
 </Project>
