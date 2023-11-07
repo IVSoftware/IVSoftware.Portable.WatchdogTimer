@@ -8,14 +8,106 @@ A timer that completes _one_ time, after the TimeSpan in the `Interval` property
 
 **Display an alert after user moves the mouse**
 
-We know that we're interested in mouse move events, but obviously don't want to make a message eash time one occurs.
+Suppose we're interested in mouse move events, but obviously don't want to make a message each time one occurs.
+
+
+![Winforms App Image](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/readme-inprog/IVSoftware.Portable.WatchdogTimer/Screenshots/winforms.png)
+
+```
+public partial class MainForm : Form
+{
+    public MainForm() => InitializeComponent();
+
+    WatchdogTimer _wdtMouseMove = new WatchdogTimer
+    {
+        Interval = TimeSpan.FromSeconds(0.5)
+    };
+
+    DateTime _mouseStartTimeStamp = DateTime.MinValue;
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if(!_wdtMouseMove.Running)
+        {
+            _mouseStartTimeStamp = DateTime.Now;
+        }
+        _wdtMouseMove.StartOrRestart(() =>
+        {
+            BeginInvoke(() =>
+                MessageBox.Show(
+                    $"Mouse down @ {
+                        _mouseStartTimeStamp.ToString(@"hh\:mm\:ss tt")
+                    }\nTime now is {
+                        DateTime.Now.ToString(@"hh\:mm\:ss tt")
+                    }."));
+        });
+        base.OnMouseMove(e);
+    }
+}
+```
 
 
 **Debouncing**
 
 An impatient user might tap multiple times. A watchdog timer can ensure that an action takes place the first time, and requires a cooling off interval before the same action can happen again.
 
-***
+![Maui .Net Default App Image with Modifications](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/readme-inprog/IVSoftware.Portable.WatchdogTimer/Screenshots/maui.png
+)
+
+```
+public partial class MainPage : ContentPage
+{
+    int count = 0;
+
+    public MainPage()
+    {
+        BindingContext = this;
+        InitializeComponent();
+    }
+    private void OnCounterClicked(object sender, EventArgs e)
+    {
+        if (checkboxIsLockOutMechanismEnabled.IsChecked)
+        {
+            ExtendLockout();
+        }
+        count++;
+        if (count == 1)
+            CounterBtn.Text = $"Clicked {count} time";
+        else
+            CounterBtn.Text = $"Clicked {count} times";
+
+        SemanticScreenReader.Announce(CounterBtn.Text);
+    }
+    WatchdogTimer _wdtOverlay = new WatchdogTimer { Interval = TimeSpan.FromSeconds(2) };
+
+    private void ExtendLockout()
+    {
+        _wdtOverlay.StartOrRestart(
+            initialAction: () => IsLockedOut = true,
+            completeAction: () => IsLockedOut = false);
+    }
+
+    public bool IsLockedOut
+    {
+        get => _isLockedOut;
+        set
+        {
+            if (!Equals(_isLockedOut, value))
+            {
+                _isLockedOut = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+    bool _isLockedOut = false;
+
+    private void OnOverlayTapped(object sender, TappedEventArgs e)
+    {
+        ExtendLockout();
+    }
+}
+```
+___
+
 **Methods**
 
     /// <summary>
@@ -102,6 +194,6 @@ An impatient user might tap multiple times. A watchdog timer can ensure that an 
 
 **StackOverflow**
 
-[I want to call a method after some delay when an event is raised, but any subsequent events should "restart" this delay.](https://stackoverflow.com/q/75284980/5438626)
+[Call a method after some delay when an event is raised, but any subsequent events should "restart" this delay.](https://stackoverflow.com/q/75284980/5438626)
 
 
