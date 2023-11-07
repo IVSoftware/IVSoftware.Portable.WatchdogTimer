@@ -9,15 +9,14 @@
 		<Authors>IVSoftware, Thomas C. Gregor</Authors>
 		<Owner>IVSoftware LLC</Owner>
 		<Copyright>Copyright © 2023 IVSoftware LLC</Copyright>
-		<SignAssembly>true</SignAssembly>
-		<AssemblyOriginatorKeyFile>E:\one-drive-microsoft-musicphrenia\OneDrive\IVSoftware Admin\Certificates PFX\ivsoftware-nuget-portable.pfx</AssemblyOriginatorKeyFile>
-		<AssemblyVersion>1.1.0.0</AssemblyVersion>
+		<SignAssembly>True</SignAssembly>
+		<AssemblyVersion>1.2.0-beta</AssemblyVersion>
 		<FileVersion>$(AssemblyVersion)</FileVersion>
 		<Version>$(AssemblyVersion)</Version>
-		<PackageProjectUrl>https://github.com/IVSoftware/IVSoftware.WinForms.HitTestTableLayoutPanel.git</PackageProjectUrl>
+		<PackageProjectUrl>https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git</PackageProjectUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageTags>timer;watchdog;portable;net;android;ios</PackageTags>
-		<IncludeSymbols>False</IncludeSymbols>
+		<IncludeSymbols>True</IncludeSymbols>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 	</PropertyGroup>

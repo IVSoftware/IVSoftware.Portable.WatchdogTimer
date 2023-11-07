@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="IVSoftware.Portable.WatchdogTimer" Version="1.1.0" />
+    <PackageReference Include="IVSoftware.Portable.WatchdogTimer" Version="1.1.1" />
   </ItemGroup>
 
 </Project>
