@@ -11,7 +11,7 @@ A timer that completes _one_ time, after the TimeSpan in the `Interval` property
 Suppose we're interested in mouse move events, but obviously don't want to make a message each time one occurs.
 
 
-![Winforms App Image](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/readme-inprog/IVSoftware.Portable.WatchdogTimer/Screenshots/winforms.png)
+![Winforms App Image](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/master/IVSoftware.Portable.WatchdogTimer/Screenshots/winforms.png)
 
 ```
 public partial class MainForm : Form
@@ -50,7 +50,7 @@ public partial class MainForm : Form
 
 An impatient user might tap multiple times. A watchdog timer can ensure that an action takes place the first time, and requires a cooling off interval before the same action can happen again.
 
-![Maui .Net Default App Image with Modifications](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/readme-inprog/IVSoftware.Portable.WatchdogTimer/Screenshots/maui.png
+![Maui .Net Default App Image with Modifications](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/master/IVSoftware.Portable.WatchdogTimer/Screenshots/maui.png
 )
 
 ```
