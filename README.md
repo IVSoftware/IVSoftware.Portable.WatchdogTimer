@@ -56,7 +56,7 @@ An impatient user might tap multiple times. A watchdog timer can ensure that an 
     public void StartOrRestart() => StartOrRestart(null, EventArgs.Empty);
 
     /// <summary>
-    /// Restart the watchdog timer.
+    /// Restart the watchdog timer injecting a custom event to be fired on completion.
     /// </summary>
     /// <remarks>
     /// Subscribe to the RanToCompletion event to receive notification of completion.  
@@ -65,14 +65,23 @@ An impatient user might tap multiple times. A watchdog timer can ensure that an 
     public void StartOrRestart(EventArgs e) => StartOrRestart(null, e);
 
     /// <summary>
-    /// Restart the watchdog timer.
+    /// Restart the watchdog timer with action to invoke on completion.
     /// </summary>
     /// <remarks>
     /// Subscribe to the RanToCompletion event to receive notification of completion.  
     /// On completion, invoke a parameterized action.
     /// </remarks>
     public void StartOrRestart(Action action) => StartOrRestart(action, EventArgs.Empty);
-        
+
+    /// <summary>
+    /// Restart the watchdog timer with actions to invoke on initialization and completion.
+    /// </summary>
+    /// <remarks>
+    /// Invoke an initial parameterized action if not already running.
+    /// Subscribe to the RanToCompletion event to receive notification of completion.  
+    /// On completion, invoke a parameterized action.
+    /// </remarks>
+    public void StartOrRestart(Action initialAction, Action completeAction);        
 
     public void Cancel() => _isCancelled = true;    
 
