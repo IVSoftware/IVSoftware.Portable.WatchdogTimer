@@ -1,10 +1,10 @@
 # Watchdog timer
 
-#### _What is it?_
+## _What is it?_
 
 A timer that completes _one_ time, after the TimeSpan in the `Interval` property has elapsed since the _most recent call_ to the `StartOrRestart` method, regardless of the number of restarts. Invoking the `Cancel` method negates any enqueued action or event in the queue.
 
-#### _Examples_
+### _Examples_
 
 **Display an alert after user moves the mouse**
 
