@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
+		<VersionPrefix>1.2.1.0</VersionPrefix>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<Title>IVSoftware.Portable.WatchdogTimer</Title>
 		<Description>Flexible watchdog timer implementation eliminates exceptions for canceled Tasks.</Description>	  
@@ -10,7 +11,6 @@
 		<Owner>IVSoftware LLC</Owner>
 		<Copyright>Copyright © 2023 IVSoftware LLC</Copyright>
 		<SignAssembly>True</SignAssembly>
-		<AssemblyVersion>1.2.0-beta</AssemblyVersion>
 		<FileVersion>$(AssemblyVersion)</FileVersion>
 		<Version>$(AssemblyVersion)</Version>
 		<PackageProjectUrl>https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git</PackageProjectUrl>
