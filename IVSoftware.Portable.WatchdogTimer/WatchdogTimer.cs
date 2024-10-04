@@ -25,6 +25,17 @@ namespace IVSoftware.Portable
             DefaultInitialAction = defaultInitialAction;
             DefaultCompleteAction = defaultCompleteAction;
         }
+
+        /// <summary>
+        /// Gets the default action to be executed when the timer starts, if no other initial action is provided.
+        /// </summary>
+        private Action DefaultInitialAction { get; }
+
+        /// <summary>
+        /// Gets the default action to be executed upon successful completion of the timer, if no other completion action is provided.
+        /// </summary>
+        private Action DefaultCompleteAction { get; }
+
         /// <summary>
         /// These fields enable efficient restarts and cancellations of the timer without the need to cancel or manage running <see cref="Task"/> objects directly. 
         /// <para>
@@ -184,7 +195,7 @@ namespace IVSoftware.Portable
         }
 
         /// <summary>
-        /// Cancel all pending actions and events.
+        /// Cancels the current timer, preventing any pending completion actions and events.
         /// </summary>
         public void Cancel()
         {
@@ -195,10 +206,18 @@ namespace IVSoftware.Portable
 
         public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(1);
 
+        /// <summary>
+        /// Gets a value indicating whether the timer is currently running.
+        /// </summary>
+        /// <value><c>true</c> if the timer is running; otherwise, <c>false</c>.</value>
+        /// <remarks>
+        /// The running state is managed internally by the <see cref="WatchdogTimer"/> class and cannot be set externally.
+        /// When the running state changes, the <see cref="PropertyChanged"/> event is triggered to notify any subscribers.
+        /// </remarks>
         public bool Running
         {
             get => _running;
-            set
+            private set
             {
                 if (!Equals(_running, value))
                 {
@@ -207,7 +226,6 @@ namespace IVSoftware.Portable
                 }
             }
         }
-
         bool _running = default;
 
         /// <summary>
@@ -216,19 +234,9 @@ namespace IVSoftware.Portable
         public event EventHandler RanToCompletion;
 
         /// <summary>
-        /// summary when the timer is cancelled before completing its countdown.
+        /// Raised when the timer is cancelled before completing its countdown.
         /// </summary>
         public event EventHandler Cancelled;
-
-        /// <summary>
-        /// Gets the default action to be executed when the timer starts, if no other initial action is provided.
-        /// </summary>
-        private Action DefaultInitialAction { get; }
-
-        /// <summary>
-        /// Gets the default action to be executed upon successful completion of the timer, if no other completion action is provided.
-        /// </summary>
-        private Action DefaultCompleteAction { get; }
 
         /// <summary>
         /// Raises the <see cref="PropertyChanged"/> event to notify subscribers that a property value has changed.
