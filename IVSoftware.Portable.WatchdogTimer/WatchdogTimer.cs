@@ -28,13 +28,16 @@ namespace IVSoftware.Portable
 
         /// <summary>
         /// Gets the default action to be executed when the timer starts, if no other initial action is provided.
+        /// This property is read-only and can only be set through the constructor.
         /// </summary>
         private Action DefaultInitialAction { get; }
 
         /// <summary>
         /// Gets the default action to be executed upon successful completion of the timer, if no other completion action is provided.
+        /// This property is read-only and can only be set through the constructor.
         /// </summary>
         private Action DefaultCompleteAction { get; }
+
 
         /// <summary>
         /// These fields enable efficient restarts and cancellations of the timer without the need to cancel or manage running <see cref="Task"/> objects directly. 
