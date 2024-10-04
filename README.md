@@ -1,14 +1,14 @@
 # Watchdog timer
 
-## _What is it?_
+## _What It Is_
 
-A timer that completes _one_ time, after the TimeSpan in the `Interval` property has elapsed since the _most recent call_ to the `StartOrRestart` method, regardless of the number of restarts. Invoking the `Cancel` method negates any enqueued action or event in the queue.
+A timer that triggers once after the `TimeSpan` set in the `Interval` property has elapsed since the most recent call to the `StartOrRestart` method, regardless of how many restarts occur. Invoking the `Cancel` method prevents any pending actions or events.
 
 ### _Examples_
 
 **Display an alert after user moves the mouse**
 
-Suppose we're interested in mouse move events, but obviously don't want to make a message each time one occurs.
+Suppose we want to handle mouse move events but only trigger a single consolidated response when the mouse has stopped moving for a short period. Using a WatchdogTimer, we can ensure that an alert is displayed only after the user has stopped moving the mouse for a defined interval.
 
 
 ![Winforms App Image](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/master/IVSoftware.Portable.WatchdogTimer/Screenshots/winforms.png)
@@ -44,11 +44,16 @@ public partial class MainForm : Form
     }
 }
 ```
+Explanation:
 
+The OnMouseMove method resets the timer each time the mouse moves, and starts the timer on the first move.
+If the mouse stops moving for 0.5 seconds (as defined by Interval), the StartOrRestart method executes, displaying a message with the timestamps of the event.
+
+___
 
 **Debouncing**
 
-An impatient user might tap multiple times. A watchdog timer can ensure that an action takes place the first time, and requires a cooling off interval before the same action can happen again.
+For impatient users who tap multiple times, a WatchdogTimer can ensure the action occurs only once, requiring a cooldown period before allowing the same action again.
 
 ![Maui .Net Default App Image with Modifications](https://raw.githubusercontent.com/IVSoftware/IVSoftware.Portable.WatchdogTimer/master/IVSoftware.Portable.WatchdogTimer/Screenshots/maui.png
 )
@@ -108,87 +113,164 @@ public partial class MainPage : ContentPage
 ```
 ___
 
+**Constructor**
+
+```
+/// <summary>
+/// Initializes a new instance of the <see cref="WatchdogTimer"/> class with optional default actions for the initial and completion phases.
+/// </summary>
+/// <param name="defaultInitialAction">An optional default action to be executed when the timer starts, if no other initial action is provided in the call to the `StartOrRestart` method.</param>
+/// <param name="defaultCompleteAction">An optional default action to be executed upon successful completion of the timer, if no other completion action is provided in the call to the `StartOrRestart` method.</param>
+/// <remarks>
+/// The preferred usage is to choose one of the following approaches:
+/// - Always use default actions, or
+/// - Always use actions passed in as arguments to the method.
+/// However, in situations where both defaults and method arguments are provided, an orderly scheme is in place for resolving conflicts: actions passed as arguments to the method will always take precedence over default actions, even if defaults are set.
+/// This ensures the timer behaves predictably and consistently in scenarios where both default and explicit actions are provided.
+/// </remarks>
+public WatchdogTimer(Action defaultInitialAction = null, Action defaultCompleteAction = null);
+```
+___
+
 **Methods**
 
-    /// <summary>
-    /// Restart the watchdog timer.
-    /// </summary>
-    /// <remarks>
-    /// Core method that can take a parameterized action as well as a custom EventArgs object.
-    /// </remarks>
-    public void StartOrRestart(Action action, EventArgs e)
-    {
-        Running = true;
-        _wdtCount++;
-        var capturedCount = _wdtCount;
-        _isCancelled= false;
-        Task
-            .Delay(Interval)
-            .GetAwaiter()
-            .OnCompleted(() =>
-            {
-                // If the 'captured' localCount has not changed after awaiting the Interval, 
-                // it indicates that no new 'bones' have been thrown during that interval.        
-                if (capturedCount.Equals(_wdtCount) && !_isCancelled)
-                {
-                    action?.Invoke();
-                    Running = false;
-                    RanToCompletion?.Invoke(this, e ?? EventArgs.Empty);
-                }
-            });
-    }
+```
+/// <summary>
+/// Restarts the watchdog timer using default completion actions.
+/// </summary>
+/// <remarks>
+/// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+/// On completion, an event is fired with an empty <see cref="EventArgs"/> object.
+/// This overload does not specify an initial action, but if <see cref="DefaultInitialAction"/> is set, it will be executed. 
+/// This overload does not specify a completion action, but if <see cref="DefaultCompleteAction"/> is set, it will be executed. 
+/// </remarks>
+public void StartOrRestart();
 
-    /// <summary>
-    /// Restart the watchdog timer.
-    /// </summary>
-    /// <remarks>
-    /// Subscribe to the RanToCompletion event to receive notification of completion.  
-    /// On completion, fire an event with an empty EventArgs object.
-    /// </remarks>
-    public void StartOrRestart() => StartOrRestart(null, EventArgs.Empty);
+/// <summary>
+/// Restarts the watchdog timer using default completion actions and specified event arguments.
+/// </summary>
+/// <remarks>
+/// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+/// On completion, an event is fired with the provided <see cref="EventArgs"/> object.
+/// This overload does not specify an initial action, but if <see cref="DefaultInitialAction"/> is set, it will be executed. 
+/// This overload does not specify a completion action, but if <see cref="DefaultCompleteAction"/> is set, it will be executed. 
+/// </remarks>
+/// <param name="e">An optional <see cref="EventArgs"/> object to pass to the completion event. 
+/// If null, an empty <see cref="EventArgs"/> will be used.</param>
+public void StartOrRestart(EventArgs e);
 
-    /// <summary>
-    /// Restart the watchdog timer injecting a custom event to be fired on completion.
-    /// </summary>
-    /// <remarks>
-    /// Subscribe to the RanToCompletion event to receive notification of completion.  
-    /// On completion, fire an event using a custom parameterized EventArgs object.
-    /// </remarks>
-    public void StartOrRestart(EventArgs e) => StartOrRestart(null, e);
+/// <summary>
+/// Restarts the watchdog timer using a specified completion action.
+/// </summary>
+/// <remarks>
+/// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+/// On completion, an event is fired with an empty <see cref="EventArgs"/> object.
+/// This overload does not specify an initial action, but if <see cref="DefaultInitialAction"/> is set, it will be executed. 
+/// The provided completion action will be executed upon successful completion of the timer, overriding the <see cref="DefaultCompleteAction"/>.
+/// </remarks>
+/// <param name="action">The action to execute upon successful completion of the timer. 
+/// This parameter cannot be null and will override the <see cref="DefaultCompleteAction"/> if it is set.</param>
+/// <exception cref="ArgumentNullException">Thrown when the <paramref name="action"/> parameter is null.</exception>
+public void StartOrRestart(Action action);
 
-    /// <summary>
-    /// Restart the watchdog timer with action to invoke on completion.
-    /// </summary>
-    /// <remarks>
-    /// Subscribe to the RanToCompletion event to receive notification of completion.  
-    /// On completion, invoke a parameterized action.
-    /// </remarks>
-    public void StartOrRestart(Action action) => StartOrRestart(action, EventArgs.Empty);
+/// <summary>
+/// Restarts the watchdog timer using a specified completion action and event arguments.
+/// </summary>
+/// <remarks>
+/// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+/// On completion, an event is fired with the provided <see cref="EventArgs"/> object.
+/// This overload does not specify an initial action, but if <see cref="DefaultInitialAction"/> is set, it will be executed. 
+/// The provided completion action will be executed upon successful completion of the timer, overriding the <see cref="DefaultCompleteAction"/>.
+/// </remarks>
+/// <param name="action">The action to execute upon successful completion of the timer. 
+/// This parameter cannot be null and will override the <see cref="DefaultCompleteAction"/> if it is set.</param>
+/// <param name="e">An optional <see cref="EventArgs"/> object to pass to the completion event. 
+/// If null, an empty <see cref="EventArgs"/> will be used.</param>
+/// <exception cref="ArgumentNullException">Thrown when the <paramref name="action"/> parameter is null.</exception>
+public void StartOrRestart(Action action, EventArgs e);
 
-    /// <summary>
-    /// Restart the watchdog timer with actions to invoke on initialization and completion.
-    /// </summary>
-    /// <remarks>
-    /// Invoke an initial parameterized action if not already running.
-    /// Subscribe to the RanToCompletion event to receive notification of completion.  
-    /// On completion, invoke a parameterized action.
-    /// </remarks>
-    public void StartOrRestart(Action initialAction, Action completeAction);        
+/// <summary>
+/// Restarts the watchdog timer using specified initial and completion actions.
+/// </summary>
+/// <remarks>
+/// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+/// On completion, an event is fired with an empty <see cref="EventArgs"/> object.
+/// This overload allows clients to specify both an initial action and a completion action, 
+/// and both actions will override <see cref="DefaultInitialAction"/> and <see cref="DefaultCompleteAction"/> if they are set.
+/// </remarks>
+/// <param name="initialAction">The action to execute when starting the timer. 
+/// This parameter cannot be null and will override the <see cref="DefaultInitialAction"/> if it is set.</param>
+/// <param name="completeAction">The action to execute upon successful completion of the timer. 
+/// This parameter cannot be null and will override the <see cref="DefaultCompleteAction"/> if it is set.</param>
+/// <exception cref="ArgumentNullException">Thrown when either <paramref name="initialAction"/> or <paramref name="completeAction"/> is null.</exception>
+public void StartOrRestart(Action initialAction, Action completeAction);
 
-    public void Cancel() => _isCancelled = true;    
-
+/// <summary>
+/// Cancels the current timer, preventing any pending completion actions and events.
+/// </summary>
+/// <remarks>
+/// Calling this method stops the timer and prevents any pending completion actions from running.
+/// You can subscribe to the <see cref="Cancelled"/> event to be notified when the timer is cancelled.
+/// </remarks>
+public void Cancel();
+```
 ***
 **Properties**
 
-    public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(1);
+```
+/// <summary>
+/// Gets or sets the time interval for the watchdog timer. This interval defines the delay period before the completion action is triggered.
+/// </summary>
+/// <value>The interval duration for the timer. Defaults to 1 second if not explicitly set.</value>
+public TimeSpan Interval { get; set; }
 
-    public bool Running { get; private set; }
+/// <summary>
+/// Gets a value indicating whether the timer is currently running. This property is bindable.
+/// </summary>
+/// <value><c>true</c> if the timer is running; otherwise, <c>false</c>.</value>
+/// <remarks>
+/// The running state is managed internally by the <see cref="WatchdogTimer"/> class and cannot be set externally. 
+/// This property supports data binding and triggers the <see cref="PropertyChanged"/> event when the running state changes.
+/// </remarks>
+public bool Running { get; }
 
+/// <summary>
+/// Gets the default action to be executed when the timer starts, if no other initial action is provided. 
+/// This property is read-only and can only be set through the constructor.
+/// </summary>
+/// <value>The default initial action.</value>
+public Action DefaultInitialAction { get; }
+
+/// <summary>
+/// Gets the default action to be executed upon successful completion of the timer, if no other completion action is provided. 
+/// This property is read-only and can only be set through the constructor.
+/// </summary>
+/// <value>The default completion action.</value>
+public Action DefaultCompleteAction { get; }    
+```
 ***
 **Event**
 
-    public event EventHandler RanToCompletion;
+```
+/// <summary>
+/// Raised when the timer successfully completes its countdown and the completion action is invoked.
+/// </summary>
+public event EventHandler RanToCompletion;
 
+/// <summary>
+/// Raised when the timer is cancelled before completing its countdown.
+/// </summary>
+public event EventHandler Cancelled;
+
+/// <summary>
+/// Raised when a property value changes, supporting data binding for the <see cref="Running"/> property.
+/// </summary>
+/// <remarks>
+/// This event is triggered whenever the <see cref="Running"/> property changes. 
+/// It is part of the <see cref="INotifyPropertyChanged"/> interface to support data binding in UI frameworks.
+/// </remarks>
+public event PropertyChangedEventHandler PropertyChanged;    
+```
 ***
 
 
