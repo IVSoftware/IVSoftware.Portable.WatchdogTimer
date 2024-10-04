@@ -249,7 +249,8 @@ public Action DefaultInitialAction { get; }
 public Action DefaultCompleteAction { get; }    
 ```
 ***
-**Event**
+
+**Events**
 
 ```
 /// <summary>
