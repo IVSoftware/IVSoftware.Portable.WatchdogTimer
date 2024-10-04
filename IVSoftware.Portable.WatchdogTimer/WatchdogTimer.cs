@@ -1,27 +1,64 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Threading.Tasks;
+using static System.Collections.Specialized.BitVector32;
 
 namespace IVSoftware.Portable
 {
-    public class WatchdogTimer
+    public class WatchdogTimer : INotifyPropertyChanged
     {
+        public WatchdogTimer(Action initialAction = null, Action completeAction = null)
+        {
+            DefaultInitialAction = initialAction;
+            DefaultCompleteAction = completeAction;
+        }
+
         int _startCount = 0;
         int _cancelCount = 0;
 
         /// <summary>
-        /// Restart the watchdog timer.
+        /// Starts or restarts the watchdog timer with optional actions for initial and completion phases.
+        /// <para>
+        /// This method encapsulates the common business logic shared by multiple overloads. It begins the timer 
+        /// if it is not already running and allows for an initial action to be executed, either provided directly 
+        /// or chosen from a default action if one is set. Upon expiration of the timer interval, a completion action
+        /// is invoked unless canceled. The timer can be reset by calling this method again before the interval elapses. 
+        /// The <see cref="RanToCompletion"/> event is always raised when the timer completes successfully.
+        /// </para>
         /// </summary>
-        /// <remarks>
-        /// Core method that can take a parameterized action as well as a custom EventArgs object.
-        /// </remarks>
-        public void StartOrRestart(Action action, EventArgs e)
+        /// <param name="initialAction">An optional action to execute when the timer starts. 
+        /// If this parameter is null and <see cref="DefaultInitialAction"/> is not null, 
+        /// the <see cref="DefaultInitialAction"/> will execute.</param>
+        /// <param name="completeAction">An optional action to execute upon successful completion of the timer. 
+        /// If this parameter is null and <see cref="DefaultCompleteAction"/> is not null, 
+        /// the <see cref="DefaultCompleteAction"/> will execute.</param>
+        /// <param name="e">Optional event arguments to pass to the completion event.</param>
+        private void StartOrRestartInternal(
+            Action initialAction = null,
+            Action completeAction = null,
+            EventArgs e = null)
         {
-            Running = true;
-            _startCount++;
+            if (e is null) e = EventArgs.Empty; // Ensure event args is not null
+            if (!Running)
+            {
+                Running = true;
+
+                if (initialAction is Action alwaysAllow)
+                {
+                    alwaysAllow(); // Execute the provided initial action
+                }
+                else if (DefaultInitialAction is Action conditionalAllow)
+                {
+                    conditionalAllow(); // Execute default initial action if provided
+                }
+            }
+
+            _startCount++; // Increment start count for tracking
             var capturedStartCount = _startCount;
             var capturedCancelCount = _cancelCount;
+
             Task
-                .Delay(Interval)
+                .Delay(Interval) // Delay for the specified interval
                 .GetAwaiter()
                 .OnCompleted(() =>
                 {
@@ -29,57 +66,112 @@ namespace IVSoftware.Portable
                     // it indicates that no new 'bones' have been thrown during that interval.        
                     if (capturedStartCount.Equals(_startCount) && capturedCancelCount.Equals(_cancelCount))
                     {
-                        Running = false;
-                        RanToCompletion?.Invoke(this, e ?? EventArgs.Empty);
-                        action?.Invoke();
+                        Running = false; // Mark timer as no longer running
+                        RanToCompletion?.Invoke(this, e ?? EventArgs.Empty); // This is, of course, ALWAYS raised.
+                        (completeAction ?? DefaultCompleteAction)?.Invoke(); // Execute the completion action
                     }
                 });
         }
 
-        /// <summary>
-        /// Restart the watchdog timer.
-        /// </summary>
-        /// <remarks>
-        /// Subscribe to the RanToCompletion event to receive notification of completion.  
-        /// On completion, fire an event with an empty EventArgs object.
-        /// </remarks>
-        public void StartOrRestart() => StartOrRestart(null, EventArgs.Empty);
+
 
         /// <summary>
-        /// Restart the watchdog timer.
+        /// Restarts the watchdog timer using default completion actions.
         /// </summary>
         /// <remarks>
-        /// Subscribe to the RanToCompletion event to receive notification of completion.  
-        /// On completion, fire an event using a custom parameterized EventArgs object.
+        /// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+        /// On completion, an event is fired with an empty <see cref="EventArgs"/> object.
+        /// This overload does not specify any initial action and disallows the use of <see cref="DefaultInitialAction"/> even if set, 
+        /// relying solely on the <see cref="DefaultCompleteAction"/> if it is set.
         /// </remarks>
-        public void StartOrRestart(EventArgs e) => StartOrRestart(null, e);
+        public void StartOrRestart() =>
+            StartOrRestartInternal();
 
         /// <summary>
-        /// Restart the watchdog timer.
+        /// Restarts the watchdog timer using default completion actions and specified event arguments.
         /// </summary>
         /// <remarks>
-        /// Subscribe to the RanToCompletion event to receive notification of completion.  
-        /// On completion, invoke a parameterized action.
+        /// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+        /// On completion, an event is fired with the provided <see cref="EventArgs"/> object.
+        /// This overload does not specify any initial action and disallows the use of <see cref="DefaultInitialAction"/> even if set, 
+        /// relying solely on the <see cref="DefaultCompleteAction"/> if it is set.
         /// </remarks>
-        public void StartOrRestart(Action action) => StartOrRestart(action, EventArgs.Empty);
+        /// <param name="e">An optional <see cref="EventArgs"/> object to pass to the completion event. 
+        /// If null, an empty <see cref="EventArgs"/> will be used.</param>
+        public void StartOrRestart(EventArgs e) =>
+            StartOrRestartInternal(e: e);
 
         /// <summary>
-        /// Restart the watchdog timer.
+        /// Restarts the watchdog timer using a specified completion action and event arguments.
         /// </summary>
         /// <remarks>
-        /// Invoke an initial parameterized action if not already running.
-        /// Subscribe to the RanToCompletion event to receive notification of completion.  
-        /// On completion, invoke a parameterized action.
+        /// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+        /// On completion, an event is fired with the provided <see cref="EventArgs"/> object.
+        /// This overload does not specify any initial action and disallows the use of <see cref="DefaultInitialAction"/> even if set, 
+        /// relying solely on the <see cref="DefaultCompleteAction"/> if it is set.
         /// </remarks>
+        /// <param name="action">The action to execute upon successful completion of the timer. 
+        /// This parameter cannot be null and may throw an <see cref="ArgumentNullException"/> if null.</param>
+        /// <param name="e">An optional <see cref="EventArgs"/> object to pass to the completion event. 
+        /// If null, an empty <see cref="EventArgs"/> will be used.</param>
+        /// <exception cref="ArgumentNullException">Thrown when the <paramref name="action"/> parameter is null.</exception>
+        public void StartOrRestart(Action action, EventArgs e)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action), "The action parameter cannot be null.");
+            }
+            StartOrRestartInternal(completeAction: action, e: e);
+        }
+
+        /// <summary>
+        /// Restarts the watchdog timer using a specified completion action.
+        /// </summary>
+        /// <remarks>
+        /// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+        /// On completion, an event is fired with an empty <see cref="EventArgs"/> object.
+        /// This overload does not specify any initial action and disallows the use of <see cref="DefaultInitialAction"/> even if set, 
+        /// relying solely on the <see cref="DefaultCompleteAction"/> if it is set.
+        /// </remarks>
+        /// <param name="action">The action to execute upon successful completion of the timer. 
+        /// This parameter cannot be null and may throw an <see cref="ArgumentNullException"/> if null.</param>
+        /// <exception cref="ArgumentNullException">Thrown when the <paramref name="action"/> parameter is null.</exception>
+        public void StartOrRestart(Action action)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action), "The action parameter cannot be null.");
+            }
+            StartOrRestartInternal(completeAction: action);
+        }
+
+        /// <summary>
+        /// Restarts the watchdog timer using specified initial and completion actions.
+        /// </summary>
+        /// <remarks>
+        /// Clients may subscribe to the <see cref="RanToCompletion"/> event to receive notifications upon completion. 
+        /// On completion, an event is fired with an empty <see cref="EventArgs"/> object.
+        /// This overload allows clients to specify both an initial action and a completion action.
+        /// </remarks>
+        /// <param name="initialAction">The action to execute when starting the timer. 
+        /// This parameter cannot be null and may throw an <see cref="ArgumentNullException"/> if null.</param>
+        /// <param name="completeAction">The action to execute upon successful completion of the timer. 
+        /// This parameter cannot be null and may throw an <see cref="ArgumentNullException"/> if null.</param>
+        /// <exception cref="ArgumentNullException">Thrown when either <paramref name="initialAction"/> or <paramref name="completeAction"/> is null.</exception>
         public void StartOrRestart(Action initialAction, Action completeAction)
         {
-            if (!Running)
+            if (initialAction == null)
             {
-                Running = true;
-                initialAction();
+                throw new ArgumentNullException(nameof(initialAction), "The action parameter cannot be null.");
             }
-            StartOrRestart(completeAction, EventArgs.Empty);
+            if (completeAction == null)
+            {
+                throw new ArgumentNullException(nameof(completeAction), "The action parameter cannot be null.");
+            }
+
+            StartOrRestartInternal(initialAction: initialAction, completeAction: completeAction);
         }
+
 
         /// <summary>
         /// Cancel all pending actions and events.
@@ -92,8 +184,31 @@ namespace IVSoftware.Portable
         }
 
         public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(1);
-        public bool Running { get; private set; }
+
+        public bool Running
+        {
+            get => _running;
+            set
+            {
+                if (!Equals(_running, value))
+                {
+                    _running = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
+        bool _running = default;
+
         public event EventHandler RanToCompletion;
         public event EventHandler Cancelled;
+
+        private Action DefaultInitialAction { get; }
+        private Action DefaultCompleteAction { get; }
+
+        protected virtual void OnPropertyChanged()
+        {
+        }
+        public event PropertyChangedEventHandler PropertyChanged;
     }
 }
