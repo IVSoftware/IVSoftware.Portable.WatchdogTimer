@@ -275,6 +275,42 @@ public event PropertyChangedEventHandler PropertyChanged;
 ***
 
 
+
+### Main Features and Enhancements:
+- **Support for Default Actions at Instantiation**:
+    - You can now set default actions for `InitialAction` and `CompletedAction` at the time of instantiation. These defaults will be automatically used in the `StartOrRestart` method when no specific actions are provided.
+    - This enhances the flexibility of the timer, allowing reusable behavior without requiring actions to be passed in every time.
+    - Consider using a singleton pattern to initialize using non-static properties of the instance.
+
+```csharp
+
+        /// <summary>
+        /// Instantiate using singleton pattern.
+        /// </summary>
+        public WatchdogTimer WatchdogTimer
+        {
+            get
+            {
+                if (_watchdogTimer is null)
+                {
+                    _watchdogTimer = new WatchdogTimer(
+                        defaultInitialAction: () =>
+                        {
+                            Console.WriteLine("Timer Started");
+                        },
+                        defaultCompleteAction: () =>
+                        {
+                            Console.WriteLine("Timer Completed");
+                        }
+                    );
+                }
+                return _watchdogTimer;
+            }
+        }
+        WatchdogTimer _watchdogTimer = default;
+```
+
+
 **StackOverflow**
 
 [Call a method after some delay when an event is raised, but any subsequent events should "restart" this delay.](https://stackoverflow.com/q/75284980/5438626)
