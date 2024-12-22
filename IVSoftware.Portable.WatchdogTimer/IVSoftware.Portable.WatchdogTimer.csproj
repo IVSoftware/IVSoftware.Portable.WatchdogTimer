@@ -19,7 +19,7 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-		<AssemblyOriginatorKeyFile>231107.ivs.pfx</AssemblyOriginatorKeyFile>
+		<AssemblyOriginatorKeyFile>D:\PFX\231130.ivs.pfx</AssemblyOriginatorKeyFile>
 		<PackageReleaseNotes>
 			Main Features and Enhancements:
 			- Support for Default Actions at Instantiation: You can now set default actions for InitialAction and CompletedAction at the time of instantiation. These defaults will be automatically used in the StartOrRestart method when no specific actions are provided.
