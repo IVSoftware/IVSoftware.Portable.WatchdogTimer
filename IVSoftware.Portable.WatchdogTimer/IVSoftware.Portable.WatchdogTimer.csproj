@@ -1,12 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<Title>IVSoftware.Portable.WatchdogTimer</Title>
-		<Description>Flexible watchdog timer implementation eliminates exceptions for canceled Tasks.</Description>
+		<Description>A lightweight, event-driven watchdog timer for .NET. Ideal for debouncing, deferred callbacks, and auto-reset behaviors. Avoids TaskCanceledException by design, with optional completion and cancellation events, and observable Running state via INotifyPropertyChanged.</Description>
 		<TargetFramework>netstandard2.0</TargetFramework>
-		<PackageTags>timer;watchdog;portable;net;android;ios</PackageTags>
+		<PackageTags>watchdog;timer;debounce;async-compatible;event-driven;portable;netstandard;dotnet;cross-platform</PackageTags>
 		<RepositoryUrl>https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git</RepositoryUrl>
 		<BaseVersion>1.3.0</BaseVersion>
-		<VersionPrefix>$(BaseVersion)-prerelease</VersionPrefix>
+		<VersionPrefix>$(BaseVersion)</VersionPrefix>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<RootNamespace>IVSoftware.Portable</RootNamespace>
 		<Authors>IVSoftware, Thomas C. Gregor</Authors>
@@ -21,9 +21,17 @@
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<AssemblyOriginatorKeyFile>D:\PFX\231130.ivs.pfx</AssemblyOriginatorKeyFile>
 		<PackageReleaseNotes>
-			Main Features and Enhancements:
-			- Support for Default Actions at Instantiation: You can now set default actions for InitialAction and CompletedAction at the time of instantiation. These defaults will be automatically used in the StartOrRestart method when no specific actions are provided.
-			- Minor Fixes: Improved Property Change Notification.
+			Stable release 1.3.0
+
+			Key Features:
+			- Built-in debounce-style watchdog timer with no exceptions or Task cancellations required.
+			- `Running` state exposed and observable via INotifyPropertyChanged.
+			- Optional event handlers: `RanToCompletion`, `Cancelled`.
+
+			New in this release:
+			- Supports default initial and completion actions via constructor or overloads.
+			- Unit test coverage added to validate debounce timing, cancel behavior, awaitable usage, and clean final state.
+			- Property change events are tested and confirmed during start/stop transitions.
 		</PackageReleaseNotes>
 		<DebugType>embedded</DebugType>
 	</PropertyGroup>
