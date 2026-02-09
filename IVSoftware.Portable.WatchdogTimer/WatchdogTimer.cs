@@ -1,8 +1,8 @@
 ﻿using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
-using static System.Collections.Specialized.BitVector32;
 
 namespace IVSoftware.Portable
 {
@@ -24,6 +24,8 @@ namespace IVSoftware.Portable
         {
             DefaultInitialAction = defaultInitialAction;
             DefaultCompleteAction = defaultCompleteAction;
+            InitializeEpoch();
+            EpochTaskCompletionSource.TrySetResult(TaskStatus.Created);
         }
 
         /// <summary>
@@ -37,6 +39,21 @@ namespace IVSoftware.Portable
         /// This property is read-only and can only be set through the constructor.
         /// </summary>
         private Action DefaultCompleteAction { get; }
+
+        #region U S E R    E P O C H    V A L U E S 
+        /// <summary>
+        /// Gets the most recent non-null user-specified action to be executed upon successful completion of the timer.
+        /// </summary>
+        protected Action CompleteAction { get; set; }
+
+        /// <summary>
+        /// Gets the most recent user-specified event args to be supplied with completion
+        /// notifications. A value of <see cref="EventArgs.Empty"/> (or null) does not
+        /// overwrite the current epoch value.
+        /// </summary>
+        protected EventArgs UserEventArgs { get; set; }
+
+        #endregion U S E R    E P O C H    V A L U E S
 
 
         /// <summary>
@@ -73,16 +90,27 @@ namespace IVSoftware.Portable
             Action completeAction = null,
             EventArgs e = null)
         {
-            if (e is null) e = EventArgs.Empty; // Ensure event args is not null
             if (!Running)
             {
-                Running = true;
-                (initialAction ?? DefaultInitialAction)?.Invoke(); // Execute initial action if set
+                CompleteAction = null;  // Keep this a separate concern from virtual initialization.
+                UserEventArgs = EventArgs.Empty;
+                InitializeEpoch();
+                OnEpochInitialized(new WatchdogTimerEventArgs(
+                    initialAction: initialAction ?? DefaultInitialAction,
+                    userEvent: e));
+            }
+            if(completeAction is not null)
+            {
+                CompleteAction = completeAction;
+            }
+            if(e is not null)
+            {
+                UserEventArgs = e;
             }
 
-            _startCount++; // Increment start count for tracking
-            var capturedStartCount = _startCount;
-            var capturedCancelCount = _cancelCount;
+            // Increment start count for tracking
+            var capturedStartCount = Interlocked.Increment(ref _startCount);
+            var capturedCancelCount = Volatile.Read(ref _cancelCount);
 
             Task
                 .Delay(Interval) // Delay for the specified interval
@@ -91,14 +119,97 @@ namespace IVSoftware.Portable
                 {
                     // If the 'captured' localCount has not changed after awaiting the Interval, 
                     // it indicates that no new 'bones' have been thrown during that interval.        
-                    if (capturedStartCount.Equals(_startCount) && capturedCancelCount.Equals(_cancelCount))
+                    if (capturedStartCount.Equals(Volatile.Read(ref _startCount)) && capturedCancelCount.Equals(_cancelCount))
                     {
-                        Running = false; // Mark timer as no longer running
-                        RanToCompletion?.Invoke(this, e ?? EventArgs.Empty); // This is, of course, ALWAYS raised.
-                        (completeAction ?? DefaultCompleteAction)?.Invoke(); // Execute the completion action
+                        OnRanToCompletion(new WatchdogTimerEventArgs(CompleteAction ?? DefaultCompleteAction, UserEventArgs));
+                        // Fire and forget. Do not block a new epoch.
+                        // Signal the current awaiting subscribers when it either returns or user sets the TCS result.
+                        _ = OnCommitEpochAsync(new WatchdogTimerFinalizeEventArgs(EpochTaskCompletionSource), isCanceled: false);
                     }
                 });
         }
+
+        private void InitializeEpoch()
+        {
+            EpochTaskCompletionSource =
+                new TaskCompletionSource<TaskStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        #region O V E R R I D E S 
+        protected virtual void OnEpochInitialized(WatchdogTimerEventArgs e)
+        {
+            Running = true;
+            e.Action?.Invoke(); // Execute initial action if set
+            EpochInitialized?.Invoke(this, e);
+        }
+
+        protected virtual void OnRanToCompletion(WatchdogTimerEventArgs e)
+        {
+            Running = false; // Mark timer as no longer running
+            RanToCompletion?.Invoke(this, e ?? EventArgs.Empty); // This is, of course, ALWAYS raised.
+            e.Action?.Invoke(); // Execute the completion action
+        }
+
+        protected virtual void OnCanceled()
+        {
+            Running = false;
+            Cancelled?.Invoke(this, EventArgs.Empty);
+            // Fire and forget. Do not block a new epoch.
+            // Signal the current awaiting subscribers when it either returns or user sets the TCS result.
+            _ = OnCommitEpochAsync(new WatchdogTimerFinalizeEventArgs(EpochTaskCompletionSource), isCanceled: true);
+        }
+        #endregion O V E R R I D E S
+
+        /// <summary>
+        /// Finalize with user option to defer release.
+        /// </summary>
+        /// <remarks>
+        /// - Cancellation is signaled based on the task result.
+        /// - By contract, this object will never raise a TaskCanceledException.
+        /// - [Careful]
+        ///   e.TCS.TrySetException(...) will do that very thing, so don't do it.
+        /// </remarks>
+        protected virtual async Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled)
+        {
+            if (CommitEpochAsync is not null)
+            {
+                await CommitEpochAsync(isCanceled);
+            }
+            if (isCanceled)
+            {
+                e.TCS.TrySetResult(TaskStatus.Canceled);
+            }
+            else
+            {
+                e.TCS.TrySetResult(TaskStatus.RanToCompletion);
+            }
+        }
+        /// <summary>
+        /// Optional asynchronous callback invoked during epoch commitment, before the
+        /// epoch completion result is published to awaiters.
+        /// </summary>
+        /// <remarks>
+        /// This delegate provides a composition-based extension point for participating
+        /// in the epoch lifecycle without subclassing <see cref="WatchdogTimer"/>.
+        ///
+        /// When assigned, the delegate is awaited during <c>OnCommitEpochAsync</c>, prior
+        /// to resolving the epoch's completion task. This allows callers to perform
+        /// asynchronous work that must complete while the epoch is still considered active.
+        ///
+        /// Behavioral contract:
+        /// - The delegate is invoked at most once per epoch.
+        /// - The delegate is invoked for both normal completion and cancellation.
+        /// - The <paramref name="isCanceled"/> parameter indicates whether the epoch is
+        ///   completing due to cancellation.
+        /// - Exceptions thrown by the delegate are not converted to cancellation and
+        ///   will propagate normally.
+        /// - By contract, this mechanism will never raise <see cref="TaskCanceledException"/>.
+        ///
+        /// Implementations should avoid blocking operations and must not attempt to
+        /// complete or fault the epoch task directly.
+        /// </remarks>
+        public OnCommitEpochDLGT CommitEpochAsync { get; set; }
+
 
         /// <summary>
         /// Restarts the watchdog timer using default completion actions.
@@ -202,9 +313,8 @@ namespace IVSoftware.Portable
         /// </summary>
         public void Cancel()
         {
-            _cancelCount++;
-            Running = false;
-            Cancelled?.Invoke(this, EventArgs.Empty);
+            Interlocked.Increment(ref _cancelCount);
+            OnCanceled();
         }
 
         public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(1);
@@ -220,7 +330,7 @@ namespace IVSoftware.Portable
         public bool Running
         {
             get => _running;
-            private set
+            protected set
             {
                 if (!Equals(_running, value))
                 {
@@ -232,7 +342,13 @@ namespace IVSoftware.Portable
         bool _running = default;
 
         /// <summary>
-        /// Raised when the timer successfully completes its countdown and the completion action is invoked.
+        /// Raised when an idle timer receives start via StartOrRestart and transitions to a Running state.
+        /// </summary>
+        public event EventHandler<WatchdogTimerEventArgs> EpochInitialized;
+
+        /// <summary>
+        /// Raised when an idle timer transitions to a Running state as the result of a StartOrRestart call,
+        /// establishing a new epoch.
         /// </summary>
         public event EventHandler RanToCompletion;
 
@@ -240,6 +356,15 @@ namespace IVSoftware.Portable
         /// Raised when the timer is cancelled before completing its countdown.
         /// </summary>
         public event EventHandler Cancelled;
+
+        #region A W A I T A B L E 
+        /// <summary>
+        /// Gets the completion source representing the current epoch.
+        /// </summary>
+        public TaskCompletionSource<TaskStatus> EpochTaskCompletionSource { get; private set; }
+
+        public TaskAwaiter<TaskStatus> GetAwaiter() => EpochTaskCompletionSource.Task.GetAwaiter();
+        #endregion A W A I T A B L E
 
         /// <summary>
         /// Raises the <see cref="PropertyChanged"/> event to notify subscribers that a property value has changed.

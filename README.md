@@ -1,10 +1,235 @@
-# Watchdog timer
+# Watchdog Timer  [[GitHub](https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git)]
 
-## _What It Is_
+`WatchdogTimer` is a restartable, debounce-style timer intended for UI and event-driven workflows where a single completion event represents a *settled state*. It triggers exactly once after the `TimeSpan` specified by the `Interval` property has elapsed since the most recent call to `StartOrRestart`, regardless of how many restarts occur during that interval. Calling `Cancel` suppresses completion for the current epoch.
 
-A timer that triggers once after the `TimeSpan` set in the `Interval` property has elapsed since the most recent call to the `StartOrRestart` method, regardless of how many restarts occur. Invoking the `Cancel` method prevents any pending actions or events.
+A settled state refers to activity that must stop changing before a more expensive operation can safely proceed. UI interactions are a canonical example:
 
-### _Examples_
+- Keystrokes and text changes produced by an IME
+- Mouse movement, including repeated entry and exit of a control boundary
+- Continuous list or viewport scrolling
+
+
+> _An "epoch" is defined as the interval that begins when an idle WDT receives a start instruction (via the StartOrResart method) and ends when the most-recent restart expires_
+
+
+___ 
+
+## Cancellation Without Exceptions
+
+This library is designed to avoid a common issue in the problem domain of restarting a running timer.
+
+Many asynchronous designs extend an active epoch by canceling the current task and spawning a new one. While effective, this approach creates a noisy control-flow environment in which cancellation is reported by throwing `TaskCanceledException`, even though cancellation is not exceptional in a debouncing scenario. It is expected, frequent, and often the primary mechanism by which intermediate work is intentionally suppressed.
+
+`WatchdogTimer` addresses this by separating cancellation *observation* from cancellation *exceptionality*.
+
+Rather than canceling in-flight delay tasks and spawning new ones, all scheduled delays are allowed to expire naturally. However, only the most recent interval (i.e. the `Interval` property `TimeSpan`) is allowed to commit. Earlier expirations are superseded and have no effect.
+
+### Benefits
+
+The WDT raises clean, actionable `RanToCompletion` or `Cancelled` events.
+
+- No `CancellationToken` usage
+- No canceled tasks
+- No exception-based control flow
+- No requirement to guard `await` calls with try/catch
+
+The same pattern applies to non-UI sources of activity, polling, or latency:
+
+- Synchronizing file system changes
+- Polling hardware data packets
+
+___
+
+## New Virtual Methods in this Release
+
+Beginning with version 1.3.1, subclassing is facilitated by exposing lifecycle hooks through protected virtual methods:
+
+- OnEpochInitialized()
+- OnRanToCompletion()
+- OnCanceled()
+
+---
+
+## Await Semantics
+
+Beginning with version 1.3.1, the `WatchdogTimer` (WDT) class may be awaited.
+
+At first glance, this can appear counterintuitive in an event-driven design. However, awaiting the WDT provides a well-defined synchronization point that is difficult to express using events alone.
+
+Common use cases include:
+
+- Test scenarios involving the WDT itself, or components that depend on it, where deterministic completion is required.
+- Atomic asynchronous workflows in which epoch settlement represents the start of a broader asynchronous operation rather than its conclusion.
+
+### Awaitable Workflow Example
+
+First, create an arbitrary `TextInputModel` class that inherits `WatchdogTimer` where any change to the `InputText` property kicks the WDT.
+
+Now, consider this unit testing scenario:
+
+1. The unit test starts by virtually typing into a text entry field.
+2. Each text change starts, or restarts, a settling interval.
+3. When quiescence signals that the simulated user has stopped typing, perform a query on an asynchronous SQLite connection.
+4. When execution resumes from the query, repopulate `Items` which is a bound observable collection.
+
+This unit test demonstrates how synchronous step #1 can be immediately awaited in the next line of code.
+
+```
+[TestMethod]
+public async Task Test_TextEntryModel()
+{
+    string actual, expected;
+    TextEntryModel entry = new();
+    entry.InputText = "hello";
+    await entry;
+    // SERIALIZE the items list to compare its contents to an expected JSON string.
+    actual = JsonConvert.SerializeObject(entry.Items);
+    expected = @"[{""Id"":1,""Description"":""Hello""}]";
+    Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
+}
+```
+
+___
+
+### Awaitable Override Semantics
+
+The `TextEntryModel` class performs this easily by overriding an awaitable method in the WDT base class:
+
+```
+protected virtual Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled) { }
+```
+
+The critical distinction is that this method runs _before_ the task completion source for the current epoch is set. So in this turnkey example class, the async database query runs within the epoch and allowing the `Items` list to be populated before signaling resume.
+
+
+### Awaitable by Inheritance Model
+
+In this model, the class itself *is* a `WatchdogTimer`. Epoch participation is expressed by overriding lifecycle hooks directly on the base class.
+
+This approach is appropriate when the type's identity and behavior are naturally centered around the timer itself, and when in-epoch work is an intrinsic responsibility of the class.
+
+
+```
+class TextEntryModel : WatchdogTimer
+{
+    public TextEntryModel() => InitializeAsync();
+
+    private async void InitializeAsync()
+    {
+        Interval = TimeSpan.FromSeconds(0.25); 
+        if (_database is null)
+        {
+            _database = new SQLiteAsyncConnection(":memory:");
+            await _database.CreateTableAsync<Item>();
+            await _database.InsertAsync(new Item { Description = "Hello" });
+            _init.TrySetResult(null);
+        }
+    }
+    public SQLiteAsyncConnection _database = null!;
+    public ObservableCollection<Item> Items { get; } = new ();
+    TaskCompletionSource<object?> _init = new();
+
+    public string InputText
+    {
+        get => _inputText;
+        set
+        {
+            if (!Equals(_inputText, value))
+            {
+                _inputText = value;
+                StartOrRestart();
+            }
+        }
+    }
+    string _inputText = string.Empty;
+
+    protected override async Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled)
+    {
+        if(!(isCanceled || string.IsNullOrWhiteSpace(InputText)))
+        {
+            await _init.Task;
+            var recordset = await _database.QueryAsync<Item>(
+                "SELECT * FROM Item WHERE Description LIKE ?",
+                InputText);
+            Items.Clear();
+            foreach(var item in recordset)
+            {
+                Items.Add(item);
+            }
+        }
+        await base.OnCommitEpochAsync(e, isCanceled);
+    }
+}
+```
+
+---
+### Awaitable by Composition Model
+
+In this model, a class *owns* a `WatchdogTimer` rather than inheriting from it. Epoch participation is supplied by assigning a commit-time delegate, allowing asynchronous work to run within the epoch without subclassing.
+
+This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
+
+```
+
+class TextEntryModelByComposition
+{
+    WatchdogTimer _wdt = new WatchdogTimer{ Interval = TimeSpan.FromSeconds(0.25) };
+    public TaskAwaiter<TaskStatus> GetAwaiter()=> _wdt.GetAwaiter();
+
+    public TextEntryModelByComposition() => InitializeAsync();
+    private async void InitializeAsync()
+    {
+        _wdt.CommitEpochAsync = CommitEpochAsync;
+        if (_database is null)
+        {
+            _database = new SQLiteAsyncConnection(":memory:");
+            await _database.CreateTableAsync<Item>();
+            await _database.InsertAsync(new Item { Description = "Hello" });
+            _init.TrySetResult(null);
+        }
+    }
+
+    public SQLiteAsyncConnection _database = null!;
+    public ObservableCollection<Item> Items { get; } = new();
+    TaskCompletionSource<object?> _init = new();
+
+    public string InputText
+    {
+        get => _inputText;
+        set
+        {
+            if (!Equals(_inputText, value))
+            {
+                _inputText = value;
+                _wdt.StartOrRestart();
+            }
+        }
+    }
+    string _inputText = string.Empty;
+
+    private async Task CommitEpochAsync(bool isCanceled)
+    {
+        if (!(isCanceled || string.IsNullOrWhiteSpace(InputText)))
+        {
+            await _init.Task;
+            var recordset = await _database.QueryAsync<Item>(
+                "SELECT * FROM Item WHERE Description LIKE ?",
+                $"%{InputText}%");
+            Items.Clear();
+            foreach (var item in recordset)
+            {
+                Items.Add(item);
+            }
+        }
+    }
+}
+
+```
+
+___
+
+
+## More Examples
 
 **Display an alert after user moves the mouse**
 

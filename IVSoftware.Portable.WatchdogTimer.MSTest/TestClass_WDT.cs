@@ -1,11 +1,17 @@
 ﻿using IVSoftware.Portable.Disposable;
+using IVSoftware.Portable.MSTest.Models;
+using IVSoftware.Portable.MSTest.Preview;
 using IVSoftware.Portable.Xml.Linq.XBoundObject.Modeling;
+using IVSoftware.WinOS.MSTest.Extensions;
+using Ignore = Microsoft.VisualStudio.TestTools.UnitTesting.IgnoreAttribute;
+using Newtonsoft.Json;
+using SQLite;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace IVSoftware.Portable.MSTest
 {
-    [TestClass]
+    [TestClass, DoNotParallelize]
     public sealed class TestClass_WDT
     {
         [TestMethod]
@@ -32,12 +38,7 @@ namespace IVSoftware.Portable.MSTest
                     uut.EventQueue.DequeueSingleWDTTestEvent().WDTEventId,
                     "Expecting WDT to raise Initial event id.");
 
-                for (var i = 0; i < 10; i++)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(0.25));
-                    Assert.IsTrue(uut.WDT.Running);
-                    uut.WDT.StartOrRestart();
-                }
+                uut.WDT.ExecStartOrRestartLoop();
                 await uut;
                 stopwatch.Stop();
 
@@ -78,6 +79,139 @@ namespace IVSoftware.Portable.MSTest
             }
         }
 
+        [TestMethod]
+        public async Task Test_Awaitable()
+        {
+            WatchdogTimer wdt = new ();
+            Stopwatch stopwatch = new ();
+            TaskCompletionSource tcsInit = new (), tcsRTC = new ();
+            wdt.EpochInitialized += (sender, e) =>
+            {
+                tcsInit.SetResult();
+            };
+            wdt.RanToCompletion += (sender, e) =>
+            {
+                tcsRTC.SetResult();
+            };
+            await wdt;
+            { }
+            stopwatch.Restart();
+            wdt.StartOrRestart();
+            await wdt;
+            stopwatch.Stop();
+            Assert.IsTrue(stopwatch.Elapsed > TimeSpan.FromSeconds(0.9));
+
+            await tcsInit.Task;
+            await tcsRTC.Task;
+        }
+
+
+        [TestMethod]
+        public async Task Test_CanceledAwaitable()
+        {
+            WatchdogTimer wdt = new();
+            Stopwatch stopwatch = new();
+            TaskCompletionSource
+                tcsInit = new(), 
+                tcsCanceled = new(), 
+                tcsRTC = new();
+            wdt.EpochInitialized += (sender, e) =>
+            {
+                tcsInit.TrySetResult();
+            };
+            wdt.RanToCompletion += (sender, e) =>
+            {
+                tcsRTC.TrySetResult();
+            };
+            wdt.Cancelled += (sender, e) =>
+            {
+                tcsCanceled.TrySetResult();
+            };
+            await wdt;
+
+            stopwatch.Restart();
+            wdt.StartOrRestart();
+            Task
+                .Delay(TimeSpan.FromSeconds(0.5))
+                .GetAwaiter()
+                .OnCompleted(() => wdt.Cancel());
+            var taskStatus = await wdt;
+            stopwatch.Stop();
+            Assert.AreEqual(TaskStatus.Canceled, taskStatus);
+            Assert.IsTrue(stopwatch.Elapsed > TimeSpan.FromSeconds(0.4));
+            Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(0.6));
+
+            await tcsInit.Task;
+            await tcsCanceled.Task;
+        }
+
+        [TestMethod]
+        public async Task Test_Subclass()
+        {
+            WatchdogTimerWithCommit wdt = new();
+            Stopwatch stopwatch = new();
+            TaskCompletionSource tcsInit = new(), tcsRTC = new();
+            wdt.EpochInitialized += (sender, e) =>
+            {
+                tcsInit.SetResult();
+            };
+            wdt.RanToCompletion += (sender, e) =>
+            {
+                tcsRTC.SetResult();
+            };
+            await wdt;
+            { }
+            stopwatch.Restart();
+            wdt.StartOrRestart();
+            await wdt;
+            stopwatch.Stop();
+
+            Assert.IsTrue(
+                stopwatch.Elapsed > TimeSpan.FromSeconds(1.9),
+                "Expecting the commit async operation to extend the default WDT interval.");
+
+            await tcsInit.Task;
+            await tcsRTC.Task;
+        }
+
+        class WatchdogTimerWithCommit : WatchdogTimer
+        {
+            protected override async Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                await base.OnCommitEpochAsync(e, isCanceled);
+            }
+        }
+
+        [TestMethod]
+        public async Task Test_TextEntryModel()
+        {
+            string actual, expected;
+            using TextEntryModel entry = new();
+            entry.InputText = "hello";
+            await entry;
+
+            actual = JsonConvert.SerializeObject(entry.Items);
+            expected = @"[{""Id"":1,""Description"":""Hello""}]";
+            Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
+        }
+
+        [TestMethod]
+        public async Task Test_TextEntryModelByComposition()
+        {
+            string actual, expected;
+            using TextEntryModelByComposition entry = new();
+            entry.InputText = "hello";
+            await entry;
+
+            actual = JsonConvert.SerializeObject(entry.Items);
+            expected = @"[{""Id"":1,""Description"":""Hello""}]";
+            Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
+        }
+
+        /// <summary>
+        /// Legacy test class from before WDT was awaitable.
+        /// </summary>
         class SingletonWithInitialAndComplete
         {
             public Queue<SenderEventPair> EventQueue { get; } = new();
@@ -133,6 +267,37 @@ namespace IVSoftware.Portable.MSTest
             private TaskCompletionSource _tcs = new();
             public TaskAwaiter GetAwaiter() => _tcs.Task.GetAwaiter();
         }
+
+        [TestMethod]
+        public async Task Test_AsyncSQLiteConnection()
+        {
+            string actual, expected;
+
+            DHostSQLiteAsyncConnection dhost = new (async(acnx) =>
+            {
+                await acnx.CreateTableAsync<Item>();
+                await acnx.InsertAsync(new Item { Description = "Hello" });
+            });
+
+            using (dhost.GetToken())
+            {
+                var acnx = await dhost.GetCnx();
+                var recordset = await acnx.Table<Item>().ToListAsync();
+                actual = JsonConvert.SerializeObject(recordset);
+                expected = @"[{""Id"":1,""Description"":""Hello""}]";
+                Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match.");
+            }
+            await dhost;
+
+            using (dhost.GetToken())
+            {
+                var acnx = await dhost.GetCnx();
+                var recordset = await acnx.Table<Item>().ToListAsync();
+                actual = JsonConvert.SerializeObject(recordset);
+                expected = @"[{""Id"":1,""Description"":""Hello""}]";
+                Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match.");
+            }
+        }
     }
     class WDTTestEventArgs : EventArgs
     {
@@ -150,6 +315,20 @@ namespace IVSoftware.Portable.MSTest
     }
     static class MSTestExtensions
     {
+        public static void ExecStartOrRestartLoop(this WatchdogTimer @this, int loopN = 10, TimeSpan? delay = null)
+        {
+            delay ??= TimeSpan.FromSeconds(0.25);
+            _ = localStartOrRestart();
+            async Task localStartOrRestart()
+            {
+                for (int i = 0; i < loopN; i++)
+                {
+                    await Task.Delay((TimeSpan)delay);
+                    Assert.IsTrue(@this.Running);
+                    @this.StartOrRestart();
+                }
+            }
+        }
         public static T DequeueSingle<T>(this Queue<T> queue)
         {
             switch (queue.Count)
