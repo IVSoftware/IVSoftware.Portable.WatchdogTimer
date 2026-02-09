@@ -49,4 +49,7 @@
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
+	<ItemGroup>
+	  <PackageReference Include="IVSoftware.Portable.Disposable" Version="2.0.0" />
+	</ItemGroup>
 </Project>

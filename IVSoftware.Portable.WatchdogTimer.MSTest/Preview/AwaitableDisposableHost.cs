@@ -137,7 +137,7 @@ namespace IVSoftware.Portable.MSTest.Preview
         /// - Handlers that introduce asynchronous finalization are expected to retain the provided completion
         ///   source and signal it when teardown has concluded
         /// </remarks>
-        public TaskCompletionSource<TaskStatus> TCS
+        TaskCompletionSource<TaskStatus> TCS
         {
             get => _tcs ?? _tcsDflt;
             set
@@ -156,5 +156,38 @@ namespace IVSoftware.Portable.MSTest.Preview
         TaskCompletionSource<TaskStatus>? _tcs = null!;
         TaskCompletionSource<TaskStatus> _tcsDflt = null!;
         public TaskAwaiter<TaskStatus> GetAwaiter() => TCS.Task.GetAwaiter();
+
+
+        /// <summary>
+        /// Begins asynchronous participation in epoch finalization.
+        /// </summary>
+        /// <remarks>
+        /// This method grants a one-time entry into the finalization lifetime.
+        /// Tokens may overlap to represent handoffs of async work, but once all
+        /// issued tokens have been disposed, the async cycle cannot be reentered
+        /// for the current epoch.
+        /// </remarks>
+        public IDisposable BeginAsync() => DHostAsync.GetToken();
+
+        DisposableHost DHostAsync
+        {
+            get
+            {
+                if (_dhostAsync is null)
+                {
+                    _dhostAsync = new DisposableHost();
+                    _dhostAsync.BeginUsing += (sender, e) =>
+                    {
+                        TCS = new TaskCompletionSource<TaskStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    };
+                    _dhostAsync.FinalDispose += (sender, e) =>
+                    {
+                        TCS.TrySetResult(TaskStatus.RanToCompletion);
+                    };
+                }
+                return _dhostAsync;
+            }
+        }
+        DisposableHost? _dhostAsync = null;
     }
 }

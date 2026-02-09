@@ -148,7 +148,7 @@ namespace IVSoftware.Portable.MSTest
         [TestMethod]
         public async Task Test_Subclass()
         {
-            WatchdogTimerWithCommit wdt = new();
+            WatchdogTimerWithExtendedCommit wdt = new();
             Stopwatch stopwatch = new();
             TaskCompletionSource tcsInit = new(), tcsRTC = new();
             wdt.EpochInitialized += (sender, e) =>
@@ -174,12 +174,20 @@ namespace IVSoftware.Portable.MSTest
             await tcsRTC.Task;
         }
 
-        class WatchdogTimerWithCommit : WatchdogTimer
+        /// <summary>
+        /// Demonstrates simulated async work within the WDT epoch.
+        /// </summary>
+        /// <remarks>
+        /// If caller is awaiting the WDT than they're awaiting this work as well.
+        /// </remarks>
+        class WatchdogTimerWithExtendedCommit : WatchdogTimer
         {
-            protected override async Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled)
+            protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
             {
+                // Simulate work - like an async query.
                 await Task.Delay(TimeSpan.FromSeconds(1));
-                await base.OnCommitEpochAsync(e, isCanceled);
+
+                await base.OnEpochFinalizingAsync(e);
             }
         }
 

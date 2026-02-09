@@ -15,7 +15,7 @@ namespace IVSoftware.Portable.MSTest.Models
     {
         public TextEntryModelByComposition()
         {
-            _wdt.CommitEpochAsync = CommitEpochAsync;
+            _wdt.EpochFinalizing += async (sender, e) => await CommitEpochAsync(e);
             _dhost.GetToken();
         }
 
@@ -44,18 +44,21 @@ namespace IVSoftware.Portable.MSTest.Models
         }
         string _inputText = string.Empty;
 
-        private async Task CommitEpochAsync(bool isCanceled)
+        private async Task CommitEpochAsync(EpochFinalizingAsyncEventArgs e)
         {
-            if (!(isCanceled || string.IsNullOrWhiteSpace(InputText)))
+            if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
             {
-                var acnx = await _dhost.GetCnx();
-                var recordset = await acnx.QueryAsync<Item>(
-                    "SELECT * FROM Item WHERE Description LIKE ?",
-                    $"%{InputText}%");
-                Items.Clear();
-                foreach (var item in recordset)
+                using (e.BeginAsync())
                 {
-                    Items.Add(item);
+                    var acnx = await _dhost.GetCnx();
+                    var recordset = await acnx.QueryAsync<Item>(
+                        "SELECT * FROM Item WHERE Description LIKE ?",
+                        $"%{InputText}%");
+                    Items.Clear();
+                    foreach (var item in recordset)
+                    {
+                        Items.Add(item);
+                    }
                 }
             }
         }

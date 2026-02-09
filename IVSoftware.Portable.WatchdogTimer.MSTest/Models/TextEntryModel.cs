@@ -40,9 +40,9 @@ namespace IVSoftware.Portable.MSTest.Models
         }
         string _inputText = string.Empty;
 
-        protected override async Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled)
+        protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
         {
-            if (!(isCanceled || string.IsNullOrWhiteSpace(InputText)))
+            if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
             {
                 var acnx = await _dhost.GetCnx();
                 var recordset = await acnx.QueryAsync<Item>(
@@ -54,7 +54,7 @@ namespace IVSoftware.Portable.MSTest.Models
                     Items.Add(item);
                 }
             }
-            await base.OnCommitEpochAsync(e, isCanceled);
+            await base.OnEpochFinalizingAsync(e);
         }
 
         public void Dispose()=>_dhost.Tokens.Single().Dispose();
