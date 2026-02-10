@@ -110,24 +110,21 @@ This approach is appropriate when the type's identity and behavior are naturally
 
 
 ```
-class TextEntryModel : WatchdogTimer
+class TextEntryModel : WatchdogTimer, IDisposable
 {
-    public TextEntryModel() => InitializeAsync();
-
-    private async void InitializeAsync()
+    public TextEntryModel()
     {
-        Interval = TimeSpan.FromSeconds(0.25); 
-        if (_database is null)
-        {
-            _database = new SQLiteAsyncConnection(":memory:");
-            await _database.CreateTableAsync<Item>();
-            await _database.InsertAsync(new Item { Description = "Hello" });
-            _init.TrySetResult(null);
-        }
+        Interval = TimeSpan.FromSeconds(0.25);
+        _dhost.GetToken();
     }
-    public SQLiteAsyncConnection _database = null!;
-    public ObservableCollection<Item> Items { get; } = new ();
-    TaskCompletionSource<object?> _init = new();
+
+    private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
+    {
+        await acnx.CreateTableAsync<Item>();
+        await acnx.InsertAsync(new Item { Description = "Hello" });
+    });
+
+    public ObservableCollection<Item> Items { get; } = new();
 
     public string InputText
     {
@@ -143,22 +140,24 @@ class TextEntryModel : WatchdogTimer
     }
     string _inputText = string.Empty;
 
-    protected override async Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled)
+    protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
     {
-        if(!(isCanceled || string.IsNullOrWhiteSpace(InputText)))
+        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
         {
-            await _init.Task;
-            var recordset = await _database.QueryAsync<Item>(
+            var acnx = await _dhost.GetCnx();
+            var recordset = await acnx.QueryAsync<Item>(
                 "SELECT * FROM Item WHERE Description LIKE ?",
-                InputText);
+                $"%{InputText}%");
             Items.Clear();
-            foreach(var item in recordset)
+            foreach (var item in recordset)
             {
                 Items.Add(item);
             }
         }
-        await base.OnCommitEpochAsync(e, isCanceled);
+        await base.OnEpochFinalizingAsync(e);
     }
+
+    public void Dispose()=>_dhost.Tokens.Single().Dispose();
 }
 ```
 
@@ -170,28 +169,24 @@ In this model, a class *owns* a `WatchdogTimer` rather than inheriting from it. 
 This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
 
 ```
-
-class TextEntryModelByComposition
+class TextEntryModelByComposition : IDisposable
 {
-    WatchdogTimer _wdt = new WatchdogTimer{ Interval = TimeSpan.FromSeconds(0.25) };
-    public TaskAwaiter<TaskStatus> GetAwaiter()=> _wdt.GetAwaiter();
-
-    public TextEntryModelByComposition() => InitializeAsync();
-    private async void InitializeAsync()
+    public TextEntryModelByComposition()
     {
-        _wdt.CommitEpochAsync = CommitEpochAsync;
-        if (_database is null)
-        {
-            _database = new SQLiteAsyncConnection(":memory:");
-            await _database.CreateTableAsync<Item>();
-            await _database.InsertAsync(new Item { Description = "Hello" });
-            _init.TrySetResult(null);
-        }
+        _wdt.EpochFinalizing += async (sender, e) => await CommitEpochAsync(e);
+        _dhost.GetToken();
     }
 
-    public SQLiteAsyncConnection _database = null!;
+    private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
+    {
+        await acnx.CreateTableAsync<Item>();
+        await acnx.InsertAsync(new Item { Description = "Hello" });
+    });
+
+    WatchdogTimer _wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
+    public TaskAwaiter<TaskStatus> GetAwaiter() => _wdt.GetAwaiter();
+
     public ObservableCollection<Item> Items { get; } = new();
-    TaskCompletionSource<object?> _init = new();
 
     public string InputText
     {
@@ -207,23 +202,26 @@ class TextEntryModelByComposition
     }
     string _inputText = string.Empty;
 
-    private async Task CommitEpochAsync(bool isCanceled)
+    private async Task CommitEpochAsync(EpochFinalizingAsyncEventArgs e)
     {
-        if (!(isCanceled || string.IsNullOrWhiteSpace(InputText)))
+        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
         {
-            await _init.Task;
-            var recordset = await _database.QueryAsync<Item>(
-                "SELECT * FROM Item WHERE Description LIKE ?",
-                $"%{InputText}%");
-            Items.Clear();
-            foreach (var item in recordset)
+            using (e.BeginAsync())
             {
-                Items.Add(item);
+                var acnx = await _dhost.GetCnx();
+                var recordset = await acnx.QueryAsync<Item>(
+                    "SELECT * FROM Item WHERE Description LIKE ?",
+                    $"%{InputText}%");
+                Items.Clear();
+                foreach (var item in recordset)
+                {
+                    Items.Add(item);
+                }
             }
         }
     }
+    public void Dispose() => _dhost.Tokens.Single().Dispose();
 }
-
 ```
 
 ___

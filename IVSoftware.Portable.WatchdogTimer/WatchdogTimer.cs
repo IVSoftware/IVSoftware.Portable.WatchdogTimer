@@ -101,9 +101,7 @@ namespace IVSoftware.Portable
                 CompleteAction = null;          // Reset authority for epoch but allow non-null overwrites.
                 UserEventArgs = EventArgs.Empty;
                 InitializeEpoch();
-                OnEpochInitialized(
-                    initialAction: initialAction ?? DefaultInitialAction,
-                    userEvent: e);
+                OnEpochInitialized();
             }
             if(completeAction is not null)
             {
@@ -150,9 +148,10 @@ namespace IVSoftware.Portable
         }
 
         #region O V E R R I D E S 
-        protected virtual void OnEpochInitialized(Action initialAction, EventArgs userEvent)
+        protected virtual void OnEpochInitialized()
         {
             Running = true;
+            var initialAction = InitialAction ?? DefaultInitialAction;
             initialAction?.Invoke(); // Execute initial action if set
             EpochInitialized?.Invoke(this, UserEventArgs ?? EventArgs.Empty);
         }
