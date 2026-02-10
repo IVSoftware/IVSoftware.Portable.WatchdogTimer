@@ -5,9 +5,11 @@
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<PackageTags>watchdog;timer;debounce;async-compatible;event-driven;portable;netstandard;dotnet;cross-platform</PackageTags>
 		<RepositoryUrl>https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git</RepositoryUrl>
-		<BaseVersion>1.3.1</BaseVersion>
 		<LangVersion>latest</LangVersion>
-		<VersionPrefix>$(BaseVersion)-alpha03</VersionPrefix>
+		
+		<BaseVersion>1.3.1</BaseVersion>
+		<VersionPrefix>$(BaseVersion)-alpha06</VersionPrefix>
+		
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<RootNamespace>IVSoftware.Portable</RootNamespace>
 		<Authors>IVSoftware, Thomas C. Gregor</Authors>
@@ -33,13 +35,14 @@
 			- Supports default initial and completion actions via constructor or overloads.
 			- Unit test coverage added to validate debounce timing, cancel behavior, awaitable usage, and clean final state.
 			- Property change events are tested and confirmed during start/stop transitions.
-			
-			Beta release 1.3.1	
+
+			Beta release 1.3.1
 			Improved support for subclassing.
 			- ADDED virtual methods for OnInitialized and OnRanToCompletion.
 			- Running property setter is protected not private.
 			- Initialization now raises a dedicated event
-			WDT is now awaitable on discrete epochs. (This is useful mainly for testing scenarios).		
+			WDT is now awaitable on discrete epochs. (This is especially useful for testing scenarios).
+			WDT epochs now have a _synchronous_ `EpochFinalizing` event featuring an _awaitable_ `EpochFinalizingEventArgs` class.
 		</PackageReleaseNotes>
 		<DebugType>embedded</DebugType>
 	</PropertyGroup>

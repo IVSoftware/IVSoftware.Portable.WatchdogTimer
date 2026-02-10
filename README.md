@@ -96,7 +96,7 @@ ___
 The `TextEntryModel` class performs this easily by overriding an awaitable method in the WDT base class:
 
 ```
-protected virtual Task OnCommitEpochAsync(WatchdogTimerFinalizeEventArgs e, bool isCanceled) { }
+protected virtual Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e, bool isCanceled) { }
 ```
 
 The critical distinction is that this method runs _before_ the task completion source for the current epoch is set. So in this turnkey example class, the async database query runs within the epoch and allowing the `Items` list to be populated before signaling resume.

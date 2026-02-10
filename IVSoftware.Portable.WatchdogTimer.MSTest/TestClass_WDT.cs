@@ -306,6 +306,40 @@ namespace IVSoftware.Portable.MSTest
                 Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match.");
             }
         }
+
+
+        [TestMethod]
+        public async Task Test_BeginAsync()
+        {
+            string actual, expected;
+            var wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
+
+            /// Connection point 1
+            wdt.EpochFinalizing += async (sender, e) =>
+            {
+                using (e.BeginAsync())
+                {
+
+                }
+            };
+            /// Connection point 2
+            wdt.EpochFinalizing += async (sender, e) =>
+            { 
+                // Make sure the first token disposes before checking out a new one.
+                await Task.Delay(100);
+
+                // Now get, set THRO-O-O-W (before fixing)
+                // CONFIRMED: Throw in 1.3.1-alpha04
+                // CONFIRMED: Fix in 1.3.1-alpha05                 
+                using (e.BeginAsync())
+                {
+
+                }
+            };
+
+            wdt.StartOrRestart();
+            await wdt;
+        }
     }
     class WDTTestEventArgs : EventArgs
     {

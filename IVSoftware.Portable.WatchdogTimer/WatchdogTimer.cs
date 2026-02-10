@@ -1,4 +1,5 @@
-﻿using System;
+﻿using IVSoftware.Portable.Disposable;
+using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -129,14 +130,21 @@ namespace IVSoftware.Portable
                         // Signal the current awaiting subscribers when it either returns or user sets the TCS result.
                         var e = new EpochFinalizingAsyncEventArgs(isCanceled: false);
 
-
+                        // Ensure that multiple subscribers all get a chance to obtain their
+                        // tokens without any chance of bouncing in and out of DHost.IsZero();
                         // Subclass organic
                         await OnEpochFinalizingAsync(e);
+
+                        // The 'e' is not an awaitable event. We can't just
+                        // await e and have our laundry exposed to the public.
+                        // Instead we have 'Busy' which is visible only to this library.
+                        await e.Busy.WaitAsync();
 
                         // OG RTC
                         OnRanToCompletion(UserEventArgs ?? EventArgs.Empty);
 
-                        EpochTaskCompletionSource.SetResult(TaskStatus.RanToCompletion);
+                        EpochTaskCompletionSource.TrySetResult(TaskStatus.RanToCompletion);
+                        e.Busy.Release();
                     }
                 });
         }
@@ -191,7 +199,6 @@ namespace IVSoftware.Portable
         {
             // Await the event itself.
             EpochFinalizing?.Invoke(this, e);
-            await e;
         }
 
 

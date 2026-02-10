@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace IVSoftware.Portable
@@ -42,67 +43,14 @@ namespace IVSoftware.Portable
         /// </remarks>
         public EpochFinalizingAsyncEventArgs(EpochFinalizingAsyncEventArgs other)
             : this(other.IsCanceled)
-        {
-            if (other is not null && other._tcs is not null)
-            {
-                _tcs = other._tcs;
-            }
-        }
-
-        /// <summary>
-        /// Gets or assigns the task completion source governing epoch finalization.
-        /// </summary>
-        /// <remarks>
-        /// The completion source is immutable once assigned and represents a single,
-        /// unambiguous authority for epoch settlement.
-        /// </remarks>
-        TaskCompletionSource<TaskStatus> TCS
-        {
-            get => _tcs ?? TCSDflt;
-            set
-            {
-                if (_tcs is null)
-                {
-                    _tcs = value;
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"{nameof(TCS)} is immutable once set.");
-                }
-            }
-        }
-
-        TaskCompletionSource<TaskStatus> _tcs;
-
-        TaskCompletionSource<TaskStatus> TCSDflt
-        {
-            get
-            {
-                if (_tcsDflt is null)
-                {
-                    _tcsDflt = new TaskCompletionSource<TaskStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _tcsDflt.TrySetResult(TaskStatus.RanToCompletion);
-                }
-                return _tcsDflt;
-            }
-        }
-        TaskCompletionSource<TaskStatus> _tcsDflt = null;
-
-        /// <summary>
-        /// Enables awaiting epoch finalization directly on the event args.
-        /// </summary>
-        public TaskAwaiter<TaskStatus> GetAwaiter()
-            => TCS.Task.GetAwaiter();
+        { }
 
         /// <summary>
         /// Begins asynchronous participation in epoch finalization.
         /// </summary>
         /// <remarks>
-        /// This method grants a one-time entry into the finalization lifetime.
-        /// Tokens may overlap to represent handoffs of async work, but once all
-        /// issued tokens have been disposed, the async cycle cannot be reentered
-        /// for the current epoch.
+        /// This method grants a parallel reference-counted slot within the finalization lifetime.
+        /// Tokens may be consecutive or overlap to represent handoffs of async work.
         /// </remarks>
         public IDisposable BeginAsync() => DHostAsync.GetToken();
 
@@ -115,16 +63,27 @@ namespace IVSoftware.Portable
                     _dhostAsync = new DisposableHost();
                     _dhostAsync.BeginUsing += (sender, e) =>
                     {
-                        TCS = new TaskCompletionSource<TaskStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        Busy.Wait(0);
                     };
                     _dhostAsync.FinalDispose += (sender, e) =>
                     {
-                        TCS.TrySetResult(TaskStatus.RanToCompletion);
+                        // DisposableHost is the sole authority on epoch participation; Busy is only a projection.
+                        // If the semaphore is already signaled, normalize quietly rather than faulting the process
+                        // over a non-authoritative synchronization artifact.
+                        Busy.Wait(0);
+
+                        // Now, with confidence, reassert the semaphore to the signaled state.
+                        Busy.Release();
                     };
                 }
                 return _dhostAsync;
             }
         }
         DisposableHost _dhostAsync = null;
+
+        /// <summary>
+        /// Restartable thread synchronization object.
+        /// </summary>
+        internal SemaphoreSlim Busy { get; } = new SemaphoreSlim(1, 1);
     }
 }
