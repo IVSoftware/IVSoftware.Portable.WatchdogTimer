@@ -42,7 +42,7 @@
 			- Running property setter is protected not private.
 			- Initialization now raises a dedicated event
 			WDT is now awaitable on discrete epochs. (This is especially useful for testing scenarios).
-			WDT epochs now have a _synchronous_ `EpochFinalizing` event featuring an _awaitable_ `EpochFinalizingEventArgs` class.
+			WDT epochs now have a _synchronous_ EpochFinalizing where 'using' EpochFinalizingEventArgs.BeginAsync(){ } checks out async blocks that must dispose before the WDT can signal continuation.
 		</PackageReleaseNotes>
 		<DebugType>embedded</DebugType>
 	</PropertyGroup>
