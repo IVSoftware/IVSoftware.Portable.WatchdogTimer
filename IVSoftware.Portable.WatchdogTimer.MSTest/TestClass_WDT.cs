@@ -393,7 +393,7 @@ namespace IVSoftware.Portable.MSTest
         ///    detached participant and results in an InvalidOperationException.
         /// </remarks>
         [TestMethod]
-        public async Task Test_Leak()
+        public async Task Test_PolicyLeak()
         {
             Stopwatch stopwatch = new();
             Queue<SenderEventPair> eventQueue = new();

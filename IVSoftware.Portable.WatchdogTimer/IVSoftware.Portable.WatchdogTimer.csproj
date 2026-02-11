@@ -8,7 +8,7 @@
 		<LangVersion>latest</LangVersion>
 		
 		<BaseVersion>1.3.1</BaseVersion>
-		<VersionPrefix>$(BaseVersion)-alpha06</VersionPrefix>
+		<VersionPrefix>$(BaseVersion)-alpha07</VersionPrefix>
 		
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<RootNamespace>IVSoftware.Portable</RootNamespace>
