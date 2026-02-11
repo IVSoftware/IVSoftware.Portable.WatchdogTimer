@@ -9,7 +9,7 @@ A settled state refers to activity that must stop changing before a more expensi
 - Continuous list or viewport scrolling
 
 
-> _An "epoch" is defined as the interval that begins when an idle WDT receives a start instruction (via the StartOrResart method) and ends when the most-recent restart expires_
+> _An "epoch" is defined as the interval that begins when an idle WDT receives a start instruction (via the StartOrRestart method) and ends when the most-recent restart expires_
 
 
 ___ 
