@@ -50,6 +50,18 @@ Beginning with version 1.3.1, subclassing is facilitated by exposing lifecycle h
 
 ---
 
+# New Added Features for Testing and Power User Applications
+
+`WatchdogTimer` has always been simple to use and still is.
+
+The features that follow introduce awaitable behavior and structured epoch participation. These capabilities are intended for testing scenarios and advanced asynchronous workflows.
+
+If you only need a restartable debounce timer with `RanToCompletion` and `Cancelled` events, you can safely stop reading here. Everything above this point is the primary, straightforward usage model.
+
+The sections below describe a more powerful — and more opinionated — execution model.
+
+___
+
 ## Await Semantics
 
 Beginning with version 1.3.1, the `WatchdogTimer` (WDT) class may be awaited.
@@ -164,12 +176,39 @@ class TextEntryModel : WatchdogTimer, IDisposable
 ---
 ### Awaitable by Composition Model
 
-In this model, a class *owns* a `WatchdogTimer` rather than inheriting from it. Epoch participation is supplied by assigning a commit-time delegate, allowing asynchronous work to run within the epoch without subclassing. This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
+The previous model *is a* `WatchdogTimer` through inheritance. In this model, a class *has a* `WatchdogTimer` instead. This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
 
-Here, calling `EpochInvokeAsync(async() =>{ ... }` enqueues the async work and prolongs the epoch until the queue is empty.
+The model below achieves parity by subscribing to the `EpochFinalizing` event. In the body of its handle for the event, a single call to `await EpochInvokeAsync(async () => { ... })` enqueues asynchronous work into a FIFO settlement queue. The epoch completes only after the queue drains.
 
+Typically, handlers run synchronously and will yield at the first sign of an `await` so _this is key:_ awaiting `EpochInvokeAsync` must be the _first_ yield within the block. 
 
 ```
+
+wdt.EpochFinalizing += async(sender, e) =>
+{
+    // Any work performed prior to the await *must* be synchronous.
+    Thread.Sleep(TimeSpan.FromSeconds(1)); // Not a problem!
+
+    await e.EpochInvokeAsync(async () =>
+    {
+        // Any sequence of synchronous and asynchronous work - Not a problem!
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Thread.Sleep(TimeSpan.FromSeconds(1));    
+        await Task.Delay(TimeSpan.FromSeconds(1));
+    });
+
+    // Performing additional work upon resume is not advised.
+};
+```
+**Not allowed**: Any _additional_ calls to `EpochInvokeAsync(async () =>{ ... })` 
+**Not advised**: Any _additional_ sync or async work _in this handler_.
+
+> We say this is advisory - continuation work is perfectly legal and has deterministic timing. But that timing _might not be what you think_ and it's better to stick to the known path.
+___
+
+#### Example
+
+```csharp
 public class TextEntryModelByComposition : IDisposable
 {
     public TextEntryModelByComposition()
@@ -207,12 +246,13 @@ public class TextEntryModelByComposition : IDisposable
     {
         if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
         {
-            e.EpochInvokeAsync(async () =>
+            await e.EpochInvokeAsync(async () =>
             { 
                 var acnx = await _dhost.GetCnx();
                 var recordset = await acnx.QueryAsync<Item>(
                     "SELECT * FROM Item WHERE Description LIKE ?",
                     $"%{InputText}%");
+
                 Items.Clear();
                 foreach (var item in recordset)
                 {
@@ -221,9 +261,17 @@ public class TextEntryModelByComposition : IDisposable
             });
         }
     }
+
     public void Dispose() => _dhost.Tokens.Single().Dispose();
 }
 ```
+
+When used as directed, the mental model is simple:
+
+1. The synchronous `EpochFinalizing` event can be made to behave "just like" a subclass that overrides `OnEpochFinalizing`. 
+2. To extend the awaited epoch and perform work _inside that timeline_, make a call to `e.EpochInvokeAsync` immediately and exclusively within the handler.
+
+Work performed outside that boundary is considered detached and will not delay awaiting callers.
 
 ___
 
