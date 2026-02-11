@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using SQLite;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using IVSoftware.Portable.Common.Exceptions;
 
 namespace IVSoftware.Portable.MSTest
 {
@@ -311,34 +312,153 @@ namespace IVSoftware.Portable.MSTest
         [TestMethod]
         public async Task Test_BeginAsync()
         {
-            string actual, expected;
+            Stopwatch stopwatch = new();
             var wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
+            Queue<SenderEventPair> eventQueue = new();
+
+            #region L o c a l F x				
+            using var local = this.WithOnDispose(
+                onInit: (sender, e) =>
+                {
+                    Throw.BeginThrowOrAdvise += localOnEvent;
+                },
+                onDispose: (sender, e) =>
+                {
+                    Throw.BeginThrowOrAdvise -= localOnEvent;
+                });
+            void localOnEvent(object? sender, EventArgs e)
+            {
+                eventQueue.Enqueue((sender, e));
+                if(e is Throw @throw)
+                {
+                    @throw.Handled = true;
+                }
+            }
+            #endregion L o c a l F x
+
 
             /// Connection point 1
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                using (e.BeginAsync())
+                await e.EpochInvokeAsync(async () =>
                 {
-
-                }
+                    await Task.Delay(TimeSpan.FromSeconds(0.1));
+                });
             };
             /// Connection point 2
             wdt.EpochFinalizing += async (sender, e) =>
-            { 
-                // Make sure the first token disposes before checking out a new one.
-                await Task.Delay(100);
-
-                // Now get, set THRO-O-O-W (before fixing)
-                // CONFIRMED: Throw in 1.3.1-alpha04
-                // CONFIRMED: Fix in 1.3.1-alpha05                 
-                using (e.BeginAsync())
+            {
+                await e.EpochInvokeAsync(async () =>
                 {
-
-                }
+                    await Task.Delay(TimeSpan.FromSeconds(0.1));
+                });
             };
 
+            wdt.EpochFinalizing += async (sender, e) =>
+            {
+                await e.EpochInvokeAsync(async () =>
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(0.1));
+                    await Task.Delay(TimeSpan.FromSeconds(0.1));
+                });
+            };
+            /// Connection point 3 - ordered
+            stopwatch.Restart();
             wdt.StartOrRestart();
             await wdt;
+            stopwatch.Stop();
+
+            Assert.IsTrue((4 * TimeSpan.FromSeconds(0.1)) + wdt.Interval <= stopwatch.Elapsed);
+
+            await Task.Delay(TimeSpan.FromSeconds(1)); // Propagate any errors now.
+            Assert.AreEqual(0, eventQueue.Count, "Expecting no throws.");
+        }
+
+
+        /// <summary>
+        /// Verifies structured epoch participation rules for <see cref="EpochInvokeAsync"/>.
+        /// </summary>
+        /// <remarks>
+        /// Each <see cref="EpochFinalizing"/> handler may invoke <see cref="EpochInvokeAsync"/>
+        /// at most once per logical participation boundary. Any combination of synchronous
+        /// or asynchronous work inside the supplied delegate is permitted.
+        /// 
+        /// Critical rule: the handler must not yield (i.e., execute an await) before calling
+        /// <see cref="EpochInvokeAsync"/>. Yielding before participation allows the epoch
+        /// to complete and causes late invocation to throw.
+        /// 
+        /// This test confirms:
+        /// 1. Mixed sync/async work inside EpochInvokeAsync prolongs the epoch correctly.
+        /// 2. A handler that yields before invoking EpochInvokeAsync is treated as a
+        ///    detached participant and results in an InvalidOperationException.
+        /// </remarks>
+        [TestMethod]
+        public async Task Test_Leak()
+        {
+            Stopwatch stopwatch = new();
+            Queue<SenderEventPair> eventQueue = new();
+            bool isPathologicalDetach = false;
+
+            #region L o c a l F x				
+            using var local = this.WithOnDispose(
+                onInit: (sender, e) =>
+                {
+                    Throw.BeginThrowOrAdvise += localOnBeginThrowOrAdvise;
+                },
+                onDispose: (sender, e) =>
+                {
+                    Throw.BeginThrowOrAdvise -= localOnBeginThrowOrAdvise;
+                });
+            void localOnBeginThrowOrAdvise(object? sender, EventArgs e)
+            {
+                eventQueue.Enqueue((sender, e));
+                if (e is Throw @throw)
+                {
+                    @throw.Handled = true;
+                }
+            }
+            #endregion L o c a l F x
+
+            var wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
+            wdt.EpochFinalizing += async(sender, e) =>
+            {
+                if(isPathologicalDetach)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(1)); // Yields the awaiter.
+                }
+                await e.EpochInvokeAsync(async () =>
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1)); // Not a problem!
+                    Thread.Sleep(TimeSpan.FromSeconds(1));     // Not a problem!
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                });
+            };
+            stopwatch.Restart();
+            wdt.StartOrRestart();
+            await wdt;
+            stopwatch.Stop();
+
+            Assert.IsTrue(stopwatch.Elapsed > TimeSpan.FromSeconds(3));
+            Assert.AreEqual(0, eventQueue.Count, "Expecting no throws.");
+
+            using (this.WithOnDispose(
+                onInit: (sender, e) =>
+                {
+                    isPathologicalDetach = true;
+                },
+                onDispose: (sender, e) =>
+                {
+                    isPathologicalDetach = false;
+                }))
+            {
+                stopwatch.Restart();
+                wdt.StartOrRestart();
+                await wdt;
+                stopwatch.Stop();
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1)); // Propagate any "late hit" errors now.
+            Assert.AreEqual(1, eventQueue.Count, "Expecting Throw.");
         }
     }
     class WDTTestEventArgs : EventArgs

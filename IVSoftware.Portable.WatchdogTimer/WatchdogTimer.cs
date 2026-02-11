@@ -1,4 +1,5 @@
-﻿using IVSoftware.Portable.Disposable;
+﻿using IVSoftware.Portable;
+using IVSoftware.Portable.Common.Exceptions;
 using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -26,7 +27,7 @@ namespace IVSoftware.Portable
             DefaultInitialAction = defaultInitialAction;
             DefaultCompleteAction = defaultCompleteAction;
             InitializeEpoch();
-            EpochTaskCompletionSource.TrySetResult(TaskStatus.Created);
+            EpochTaskCompletionSource.TrySetResult(TaskStatus.RanToCompletion);
         }
 
         /// <summary>
@@ -126,27 +127,42 @@ namespace IVSoftware.Portable
                     // it indicates that no new 'bones' have been thrown during that interval.        
                     if (capturedStartCount.Equals(Volatile.Read(ref _startCount)) && capturedCancelCount.Equals(_cancelCount))
                     {
+                        //  RanToCompletion event - Naive as far as async is concerned.
+                        OnRanToCompletion(UserEventArgs ?? EventArgs.Empty);
+
                         // Fire and forget. Do not block a new epoch.
                         // Signal the current awaiting subscribers when it either returns or user sets the TCS result.
-                        var e = new EpochFinalizingAsyncEventArgs(isCanceled: false);
+                        var e = new EpochFinalizingAsyncEventArgs(TakeSnapshot(isCanceled: false));
 
                         // Ensure that multiple subscribers all get a chance to obtain their
                         // tokens without any chance of bouncing in and out of DHost.IsZero();
                         // Subclass organic
                         await OnEpochFinalizingAsync(e);
-
-                        // The 'e' is not an awaitable event. We can't just
-                        // await e and have our laundry exposed to the public.
-                        // Instead we have 'Busy' which is visible only to this library.
-                        await e.Busy.WaitAsync();
-
-                        // OG RTC
-                        OnRanToCompletion(UserEventArgs ?? EventArgs.Empty);
-
-                        EpochTaskCompletionSource.TrySetResult(TaskStatus.RanToCompletion);
-                        e.Busy.Release();
+                        await e.EpochInvokeAsync(async () =>
+                        {
+                            e.TCS.TrySetResult(TaskStatus.RanToCompletion);
+                        });
                     }
                 });
+        }
+        private readonly object _lock = new object();
+
+        EpochFinalizationSnapshot TakeSnapshot(bool isCanceled)
+        {
+            EpochFinalizationSnapshot snapshot;
+            lock (_lock)
+            {
+                snapshot = new EpochFinalizationSnapshot
+                {
+                    TCS = EpochTaskCompletionSource,
+                    UserEventArgs = UserEventArgs,
+                    IsCanceled = isCanceled,
+                };
+                EpochTaskCompletionSource = null;
+                CompleteAction = null;
+                UserEventArgs = EventArgs.Empty;
+            }
+            return snapshot;
         }
 
         private void InitializeEpoch()
@@ -164,11 +180,23 @@ namespace IVSoftware.Portable
             EpochInitialized?.Invoke(this, UserEventArgs ?? EventArgs.Empty);
         }
 
+        /// <summary>
+        /// Synchronous notification of completion.
+        /// </summary>
+        /// <remarks>
+        /// Observes original synchronous contract and is naive as far as async is concerned.
+        /// </remarks>
         protected virtual void OnRanToCompletion(EventArgs e)
         {
-            Running = false; // Mark timer as no longer running
+            Action completeAction;
+            EventArgs eventArgs;
+            lock(_lock)
+            {
+                Running = false; // Mark timer as no longer running
+                completeAction = CompleteAction ?? DefaultCompleteAction;
+                eventArgs = UserEventArgs;
+            }
             RanToCompletion?.Invoke(this, UserEventArgs ?? EventArgs.Empty);
-            var completeAction = CompleteAction ?? DefaultCompleteAction;
             completeAction?.Invoke(); // Execute the completion action
         }
 
@@ -180,15 +208,11 @@ namespace IVSoftware.Portable
             Running = false;
             Cancelled?.Invoke(this, EventArgs.Empty);
 
-            // Fire and forget. Do not block a new epoch.
-            // That said, we need to release the correct TCS so capture here.
-            var canceledTCS = EpochTaskCompletionSource;
-            // Signal the current awaiting subscribers when it either returns or user sets the TCS result.
-            var eAsync = new EpochFinalizingAsyncEventArgs(isCanceled: true);
-
-            // First, await the organic virtual method.
-            await OnEpochFinalizingAsync(eAsync);
-            canceledTCS.SetResult(TaskStatus.Canceled);
+            var e = new EpochFinalizingAsyncEventArgs(TakeSnapshot(isCanceled: true));
+            OnEpochFinalizingAsync(e).GetAwaiter().OnCompleted(() => 
+            {
+                e.TCS.TrySetResult(TaskStatus.Canceled);
+            }); 
         }
         #endregion O V E R R I D E S
 
@@ -355,7 +379,7 @@ namespace IVSoftware.Portable
         /// <summary>
         /// Gets the completion source representing the current epoch.
         /// </summary>
-        public TaskCompletionSource<TaskStatus> EpochTaskCompletionSource { get; private set; }
+        internal TaskCompletionSource<TaskStatus> EpochTaskCompletionSource { get; private set; }
 
         public TaskAwaiter<TaskStatus> GetAwaiter() => EpochTaskCompletionSource.Task.GetAwaiter();
         #endregion A W A I T A B L E

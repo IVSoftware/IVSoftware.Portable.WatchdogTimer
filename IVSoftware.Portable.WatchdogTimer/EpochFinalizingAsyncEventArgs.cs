@@ -1,4 +1,5 @@
-﻿using IVSoftware.Portable.Disposable;
+﻿using IVSoftware.Portable.Common.Exceptions;
+using IVSoftware.Portable.Disposable;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -28,31 +29,101 @@ namespace IVSoftware.Portable
         /// If no asynchronous participation is introduced, awaiting this instance
         /// completes immediately.
         /// </remarks>
-        public EpochFinalizingAsyncEventArgs(bool isCanceled)
+        internal EpochFinalizingAsyncEventArgs(
+            EpochFinalizationSnapshot snapshot)
         {
-            IsCanceled = isCanceled;
+            IsCanceled = snapshot.IsCanceled;
+            TCS = snapshot.TCS;
+            UserEventArgs = snapshot.UserEventArgs;
         }
+
         public bool IsCanceled { get; }
 
-        /// <summary>
-        /// Copy constructor that preserves async-finalization semantics when present.
-        /// </summary>
-        /// <remarks>
-        /// If the source instance is already async-aware, its completion source
-        /// is adopted to preserve continuity of the epoch finalization boundary.
-        /// </remarks>
-        public EpochFinalizingAsyncEventArgs(EpochFinalizingAsyncEventArgs other)
-            : this(other.IsCanceled)
-        { }
+
+        private readonly AsyncLocal<bool> _inEpochInvoke = new AsyncLocal<bool>();
+        private readonly SemaphoreSlim _fifo = new SemaphoreSlim(1, 1);
+
 
         /// <summary>
-        /// Begins asynchronous participation in epoch finalization.
+        /// Use this method inside an EpochFinalizing handler to prolong the epoch
+        /// with structured, ordered asynchronous work.
         /// </summary>
         /// <remarks>
-        /// This method grants a parallel reference-counted slot within the finalization lifetime.
-        /// Tokens may be consecutive or overlap to represent handoffs of async work.
+        /// Quick start rules:
+        /// 
+        /// - Call <see cref="EpochInvokeAsync"/> exactly once per handler invocation.
+        /// - Do not await (yield) before calling this method.
+        /// - Place all synchronous and asynchronous work that must participate in
+        ///   the epoch inside the supplied delegate.
+        /// 
+        /// Each call enters a FIFO queue and is awaited in order. The epoch completes
+        /// only after all queued delegates have finished. Work started outside this
+        /// method, or invoked after the epoch has completed, does not participate
+        /// in settlement.
         /// </remarks>
-        public IDisposable BeginAsync() => DHostAsync.GetToken();
+        public async Task EpochInvokeAsync(Func<Task> asyncAction, TimeSpan? timeout = null)
+        {
+            if(TCS.Task.IsCompleted)
+            {
+                var msg = @"
+See the Quick Start rules in the method documentation:
+- Call EpochInvokeAsync before yielding.
+- Participation must be declared synchronously within the handler.
+
+EpochInvokeAsync was invoked after the epoch had already completed
+(allowing any awaiting callers to resume).
+
+If this Throw is handled, the delegate will execute,
+but outside the awaited epoch boundary.
+".TrimStart();
+
+                if (this.ThrowHard<InvalidOperationException>(msg).Handled)
+                {   /* G T K */
+                    // Throw suppressed.
+                    // Epoch has already completed.
+                    // Awaiting callers have resumed.
+                    // This delegate will execute but will not be awaited.
+                }
+            }
+
+            timeout ??= TimeSpan.FromSeconds(10);
+
+            bool acquired = false;
+            bool reentrant = _inEpochInvoke.Value;
+
+            try
+            {
+                if (reentrant)
+                {
+                    this.ThrowHard<InvalidOperationException>(
+                        "EpochInvokeAsync cannot be called reentrantly within the same epoch.");
+                }
+                else
+                {
+                    acquired = await _fifo.WaitAsync(timeout.Value);
+
+                    if (acquired)
+                    {
+                        _inEpochInvoke.Value = true;
+                        await asyncAction();
+                    }
+                    else
+                    {
+                        this.ThrowHard<TimeoutException>();
+                    }
+                }
+            }
+            finally
+            {
+                if (acquired)
+                {
+                    _fifo.Release();
+                }
+
+                _inEpochInvoke.Value = false;
+            }
+        }
+
 
         DisposableHost DHostAsync
         {
@@ -81,9 +152,29 @@ namespace IVSoftware.Portable
         }
         DisposableHost _dhostAsync = null;
 
+
+
+        #region I N T E R N A L 
         /// <summary>
         /// Restartable thread synchronization object.
         /// </summary>
         internal SemaphoreSlim Busy { get; } = new SemaphoreSlim(1, 1);
+        internal TaskCompletionSource<TaskStatus> TCS { get; }
+
+        internal EventArgs UserEventArgs { get; }
+
+        #endregion I N T E R N A L
+    }
+
+    /// <summary>
+    /// Internal snapshot class.
+    /// </summary>
+    class EpochFinalizationSnapshot
+    {
+        public TaskCompletionSource<TaskStatus> TCS { get; set; }
+        public Action OnCompleted { get; set; }
+
+        public EventArgs UserEventArgs { get; set; }
+        public bool IsCanceled { get; set; }
     }
 }

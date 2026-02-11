@@ -48,8 +48,8 @@ namespace IVSoftware.Portable.MSTest.Models
         {
             if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
             {
-                using (e.BeginAsync())
-                {
+                e.EpochInvokeAsync(async () =>
+                { 
                     var acnx = await _dhost.GetCnx();
                     var recordset = await acnx.QueryAsync<Item>(
                         "SELECT * FROM Item WHERE Description LIKE ?",
@@ -59,7 +59,7 @@ namespace IVSoftware.Portable.MSTest.Models
                     {
                         Items.Add(item);
                     }
-                }
+                });
             }
         }
         public void Dispose() => _dhost.Tokens.Single().Dispose();
