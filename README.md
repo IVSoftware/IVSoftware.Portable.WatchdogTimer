@@ -166,12 +166,11 @@ class TextEntryModel : WatchdogTimer, IDisposable
 
 In this model, a class *owns* a `WatchdogTimer` rather than inheriting from it. Epoch participation is supplied by assigning a commit-time delegate, allowing asynchronous work to run within the epoch without subclassing. This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
 
-Here, calling `EpochInvokeAsync(async() =>{ ... }` prolongs the epoch until _all_ such calls have been awaited consecutively. This means:
-- Calls invoked in this manner enter a queue where they are individually awaited FIFO.
-- The handler itself is synchronous in this case and returns _immediately_ at the first awaited call (including `EpochInvokeAsync(async() =>{ ... }`);
+Here, calling `EpochInvokeAsync(async() =>{ ... }` enqueues the async work and prolongs the epoch until the queue is empty.
+
 
 ```
-class TextEntryModelByComposition : IDisposable
+public class TextEntryModelByComposition : IDisposable
 {
     public TextEntryModelByComposition()
     {
@@ -208,7 +207,7 @@ class TextEntryModelByComposition : IDisposable
     {
         if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
         {
-            await e.EpochInvokeAsync(async () =>
+            e.EpochInvokeAsync(async () =>
             { 
                 var acnx = await _dhost.GetCnx();
                 var recordset = await acnx.QueryAsync<Item>(
