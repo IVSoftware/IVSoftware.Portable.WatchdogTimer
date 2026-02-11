@@ -125,42 +125,11 @@ but outside the awaited epoch boundary.
         }
 
 
-        DisposableHost DHostAsync
-        {
-            get
-            {
-                if (_dhostAsync is null)
-                {
-                    _dhostAsync = new DisposableHost();
-                    _dhostAsync.BeginUsing += (sender, e) =>
-                    {
-                        Busy.Wait(0);
-                    };
-                    _dhostAsync.FinalDispose += (sender, e) =>
-                    {
-                        // DisposableHost is the sole authority on epoch participation; Busy is only a projection.
-                        // If the semaphore is already signaled, normalize quietly rather than faulting the process
-                        // over a non-authoritative synchronization artifact.
-                        Busy.Wait(0);
-
-                        // Now, with confidence, reassert the semaphore to the signaled state.
-                        Busy.Release();
-                    };
-                }
-                return _dhostAsync;
-            }
-        }
-        DisposableHost _dhostAsync = null;
-
-
-
         #region I N T E R N A L 
         /// <summary>
         /// Restartable thread synchronization object.
         /// </summary>
-        internal SemaphoreSlim Busy { get; } = new SemaphoreSlim(1, 1);
         internal TaskCompletionSource<TaskStatus> TCS { get; }
-
         internal EventArgs UserEventArgs { get; }
 
         #endregion I N T E R N A L

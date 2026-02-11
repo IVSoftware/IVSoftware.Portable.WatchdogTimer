@@ -10,11 +10,87 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using IVSoftware.Portable.Common.Exceptions;
 
+#if false && TODO
+TO DO — Stress and Concurrency Coverage
+
+The following scenarios are not currently covered by unit tests and
+should be validated to strengthen concurrency guarantees:
+
+1. High-Frequency Restart Storm
+   - Rapid, repeated StartOrRestart calls (hundreds or thousands).
+   - Verify single coalesced completion.
+   - Confirm no TaskCompletionSource corruption or double completion.
+   - Confirm Running state stability.
+
+2. Concurrent StartOrRestart Calls
+   - Invoke StartOrRestart from multiple threads simultaneously.
+   - Ensure epoch counters remain coherent.
+   - Confirm no duplicate completion or missed completion.
+
+3. Concurrent Awaiters
+   - Multiple callers awaiting the same epoch concurrently.
+   - Verify all resume exactly once upon settlement.
+   - Confirm consistent TaskStatus across awaiters.
+
+4. Overlapping Epoch Transitions
+   - Start a new epoch immediately after previous completion.
+   - Verify old epoch remains awaitable.
+   - Confirm new TCS replaces prior one cleanly.
+   - Ensure no cross-epoch contamination.
+
+5. EpochInvokeAsync Timeout Path
+   - Force FIFO contention and trigger timeout.
+   - Validate ThrowHard behavior.
+   - Confirm semaphore integrity after timeout.
+   - Ensure epoch still settles deterministically.
+
+6. Reentrancy Guard Stress
+   - Attempt nested EpochInvokeAsync calls.
+   - Confirm InvalidOperationException path.
+   - Verify no deadlock and no semaphore leak.
+
+7. Pathological Late Participation
+   - Yield before EpochInvokeAsync under load.
+   - Confirm guard triggers.
+   - Ensure no partial epoch prolongation.
+
+8. Parallel Independent Epoch Instances
+   - Multiple WatchdogTimer instances running concurrently.
+   - Confirm no cross-instance interference.
+   - Validate AsyncLocal isolation per epoch.
+
+9. Cancellation Under Load
+   - Cancel during heavy FIFO participation.
+   - Ensure no orphaned work extends canceled epoch.
+   - Confirm TaskStatus.Canceled consistency.
+
+10. Memory/Lifetime Audit
+    - Run many epochs in succession.
+    - Verify no retained TCS references.
+    - Confirm DisposableHost lifetimes close correctly.
+
+These tests validate structural integrity under stress,
+not just functional correctness under nominal conditions.
+#endif
+
 namespace IVSoftware.Portable.MSTest
 {
     [TestClass, DoNotParallelize]
     public sealed class TestClass_WDT
     {
+        /// <summary>
+        /// Verifies end-to-end WatchdogTimer behavior including initial notification,
+        /// restart coalescing, awaited completion timing, and cancellation semantics.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - The Initial event is raised when a new epoch begins.
+        /// - Multiple rapid StartOrRestart calls coalesce into a single completion.
+        /// - Awaiting the WDT resumes only after the final interval expires.
+        /// - The Complete event is raised exactly once per settled epoch.
+        /// - Cancellation suppresses completion and leaves the timer not running.
+        /// - The WDT remains awaitable across successive epochs.
+        /// </remarks>
         [TestMethod]
         public async Task Test_WDT()
         {
@@ -79,7 +155,19 @@ namespace IVSoftware.Portable.MSTest
                 Assert.IsFalse(uut.WDT.Running);
             }
         }
-
+        /// <summary>
+        /// Verifies that WatchdogTimer is awaitable both before and after an epoch,
+        /// and that awaiting resumes only after the interval elapses and completion
+        /// events have fired.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Awaiting an idle WDT completes immediately.
+        /// - StartOrRestart begins a new epoch and raises EpochInitialized.
+        /// - Awaiting the WDT blocks until the interval expires.
+        /// - RanToCompletion is raised before awaiting resumes.
+        /// - The awaited duration reflects the configured Interval.
+        /// </remarks>
         [TestMethod]
         public async Task Test_Awaitable()
         {
@@ -106,6 +194,19 @@ namespace IVSoftware.Portable.MSTest
             await tcsRTC.Task;
         }
 
+        /// <summary>
+        /// Verifies that a running epoch can be canceled and that awaiting the
+        /// WatchdogTimer resumes with a canceled TaskStatus.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Awaiting an idle WDT completes immediately.
+        /// - StartOrRestart begins a new epoch and raises EpochInitialized.
+        /// - Calling Cancel during the interval suppresses completion.
+        /// - Awaiting the WDT resumes with TaskStatus.Canceled.
+        /// - The elapsed time reflects the cancellation timing rather than the full interval.
+        /// - RanToCompletion is not raised when the epoch is canceled.
+        /// </remarks>
 
         [TestMethod]
         public async Task Test_CanceledAwaitable()
@@ -146,6 +247,18 @@ namespace IVSoftware.Portable.MSTest
             await tcsCanceled.Task;
         }
 
+        /// <summary>
+        /// Verifies that a subclass override of OnEpochFinalizingAsync can extend
+        /// the epoch with additional asynchronous work that participates in settlement.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Awaiting an idle WDT completes immediately.
+        /// - A subclass override can perform async work before invoking base.
+        /// - Awaiting the WDT includes the subclass’s async workload.
+        /// - The observed elapsed time reflects both the configured Interval
+        ///   and the additional async delay introduced by the override.
+        /// </remarks>
         [TestMethod]
         public async Task Test_Subclass()
         {
@@ -192,6 +305,19 @@ namespace IVSoftware.Portable.MSTest
             }
         }
 
+        /// <summary>
+        /// Verifies end-to-end integration of a WatchdogTimer-backed model that
+        /// performs asynchronous data work within the epoch boundary.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Updating InputText triggers a new epoch.
+        /// - Awaiting the model awaits the underlying WatchdogTimer.
+        /// - The asynchronous query performed during finalization completes
+        ///   before awaiting resumes.
+        /// - The resulting data population is observable and deterministic
+        ///   at the await boundary.
+        /// </remarks>
         [TestMethod]
         public async Task Test_TextEntryModel()
         {
@@ -205,6 +331,19 @@ namespace IVSoftware.Portable.MSTest
             Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
         }
 
+        /// <summary>
+        /// Verifies end-to-end behavior of a composition-based model that owns
+        /// a WatchdogTimer and participates in epoch settlement via EpochInvokeAsync.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Updating InputText triggers a new epoch on the owned WatchdogTimer.
+        /// - Async work is enrolled through EpochInvokeAsync within the
+        ///   EpochFinalizing handler.
+        /// - Awaiting the model awaits the underlying WatchdogTimer.
+        /// - Data population completes before awaiting resumes, producing
+        ///   deterministic, serialized results.
+        /// </remarks>
         [TestMethod]
         public async Task Test_TextEntryModelByComposition()
         {
@@ -277,6 +416,19 @@ namespace IVSoftware.Portable.MSTest
             public TaskAwaiter GetAwaiter() => _tcs.Task.GetAwaiter();
         }
 
+        /// <summary>
+        /// Verifies that DHostSQLiteAsyncConnection initializes once per epoch,
+        /// remains awaitable after completion, and can be re-entered in a new
+        /// reference-counted lifetime without duplicating initialization.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Initialization logic executes during the first token scope.
+        /// - Awaiting the host after disposal completes the current epoch.
+        /// - A subsequent token begins a new lifetime without re-seeding data.
+        /// - The underlying database state remains consistent across epochs.
+        /// </remarks>
+
         [TestMethod]
         public async Task Test_AsyncSQLiteConnection()
         {
@@ -308,6 +460,19 @@ namespace IVSoftware.Portable.MSTest
             }
         }
 
+        /// <summary>
+        /// Verifies that multiple EpochFinalizing handlers participate in ordered,
+        /// FIFO-serialized async settlement and that the epoch completes only after
+        /// all queued delegates finish.
+        /// </summary>
+        /// <remarks>
+        /// The test confirms:
+        /// - Each handler invokes EpochInvokeAsync exactly once.
+        /// - Async work from multiple handlers is executed sequentially in FIFO order.
+        /// - The awaited WatchdogTimer resumes only after the full serialized duration
+        ///   plus the configured Interval.
+        /// - No reentrancy or late-participation Throws occur during normal usage.
+        /// </remarks>
 
         [TestMethod]
         public async Task Test_BeginAsync()
@@ -374,7 +539,6 @@ namespace IVSoftware.Portable.MSTest
             Assert.AreEqual(0, eventQueue.Count, "Expecting no throws.");
         }
 
-
         /// <summary>
         /// Verifies structured epoch participation rules for <see cref="EpochInvokeAsync"/>.
         /// </summary>
@@ -393,7 +557,7 @@ namespace IVSoftware.Portable.MSTest
         ///    detached participant and results in an InvalidOperationException.
         /// </remarks>
         [TestMethod]
-        public async Task Test_Leak()
+        public async Task Test_PolicyLeak()
         {
             Stopwatch stopwatch = new();
             Queue<SenderEventPair> eventQueue = new();

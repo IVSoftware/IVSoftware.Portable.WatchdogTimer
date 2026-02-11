@@ -158,7 +158,6 @@ namespace IVSoftware.Portable
                     UserEventArgs = UserEventArgs,
                     IsCanceled = isCanceled,
                 };
-                EpochTaskCompletionSource = null;
                 CompleteAction = null;
                 UserEventArgs = EventArgs.Empty;
             }
