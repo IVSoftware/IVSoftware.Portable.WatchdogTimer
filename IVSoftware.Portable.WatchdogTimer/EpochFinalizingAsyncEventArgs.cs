@@ -2,6 +2,7 @@
 using IVSoftware.Portable.Disposable;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -84,7 +85,6 @@ but outside the awaited epoch boundary.
                     // This delegate will execute but will not be awaited.
                 }
             }
-
             timeout ??= TimeSpan.FromSeconds(10);
 
             bool acquired = false;
@@ -122,7 +122,7 @@ but outside the awaited epoch boundary.
                 _inEpochInvoke.Value = false;
             }
         }
-
+        public void EnqueueTask(Func<Task> task) => Awaitables.Enqueue(task);
 
         #region I N T E R N A L 
         /// <summary>
@@ -130,6 +130,8 @@ but outside the awaited epoch boundary.
         /// </summary>
         internal TaskCompletionSource<TaskStatus> TCS { get; }
         internal EventArgs UserEventArgs { get; }
+
+        internal Queue<Func<Task>> Awaitables { get; } = new Queue<Func<Task>>();
 
         #endregion I N T E R N A L
     }
