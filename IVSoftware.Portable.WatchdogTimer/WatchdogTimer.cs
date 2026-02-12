@@ -127,17 +127,25 @@ namespace IVSoftware.Portable
                     // it indicates that no new 'bones' have been thrown during that interval.        
                     if (capturedStartCount.Equals(Volatile.Read(ref _startCount)) && capturedCancelCount.Equals(_cancelCount))
                     {
-                        //  RanToCompletion event - Naive as far as async is concerned.
+                        // Original unchanged RanToCompletion event
+                        // This synchronous handler is naive as far as async is concerned.
                         OnRanToCompletion(UserEventArgs ?? EventArgs.Empty);
 
                         // Fire and forget. Do not block a new epoch.
                         // Signal the current awaiting subscribers when it either returns or user sets the TCS result.
                         var e = new EpochFinalizingAsyncEventArgs(TakeSnapshot(isCanceled: false));
 
-                        // Ensure that multiple subscribers all get a chance to obtain their
-                        // tokens without any chance of bouncing in and out of DHost.IsZero();
-                        // Subclass organic
+                        // Subclass organic virtual method.
                         await OnEpochFinalizingAsync(e);
+
+                        // The event itself has no way of knowing when it's done.
+                        // That authority is on this line, but it wouldn't work to simply set 
+                        // the TCS without knowing which async tasks might be still running.
+                        // INSTEAD: 
+                        // We post the work of doing that at the end of the existing queue.
+                        // - This provides a way to be *sure* that the other tasks have been consecutively awaited.
+                        // - But it also explains why a handler that yields first (e.g. to some other await)
+                        //   and then tries to inject the queue using e.EpochInvokeAsync() will miss the boat.
                         await e.EpochInvokeAsync(async () =>
                         {
                             e.TCS.TrySetResult(TaskStatus.RanToCompletion);
@@ -220,7 +228,9 @@ namespace IVSoftware.Portable
         /// </summary>
         protected virtual async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
         {
-            // Await the event itself.
+            // Raise the event itself - synchronously of course.
+            // But as the event visits subscribed handlers, allow them to inject
+            // asynchronous work into a fifo queue using e.EpochInvokeAsync(async()=>{ ... });
             EpochFinalizing?.Invoke(this, e);
         }
 
