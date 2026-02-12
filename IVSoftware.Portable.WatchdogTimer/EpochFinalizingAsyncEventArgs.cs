@@ -19,7 +19,6 @@ namespace IVSoftware.Portable
     /// async-aware instance, existing finalization state is preserved to maintain continuity
     /// of the timer epoch.
     /// </remarks>
-
     public sealed class EpochFinalizingAsyncEventArgs : EventArgs
     {
         /// <summary>

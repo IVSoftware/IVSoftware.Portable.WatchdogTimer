@@ -15,7 +15,7 @@ namespace IVSoftware.Portable.MSTest.Models
     {
         public TextEntryModelByComposition()
         {
-            _wdt.EpochFinalizing += async (sender, e) => await CommitEpochAsync(e);
+            _wdt.EpochFinalizing +=  (sender, e) => CommitEpoch(e);
             _dhost.GetToken();
         }
 
@@ -44,11 +44,12 @@ namespace IVSoftware.Portable.MSTest.Models
         }
         string _inputText = string.Empty;
 
-        private async Task CommitEpochAsync(EpochFinalizingAsyncEventArgs e)
+        private void CommitEpoch(EpochFinalizingAsyncEventArgs e)
         {
             if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
             {
-                e.EpochInvokeAsync(async () =>
+                // Fire and forget here, but legitimately awaited in the event class.
+                _ = e.EpochInvokeAsync(async () =>
                 { 
                     var acnx = await _dhost.GetCnx();
                     var recordset = await acnx.QueryAsync<Item>(

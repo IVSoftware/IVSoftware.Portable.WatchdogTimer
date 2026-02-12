@@ -178,42 +178,34 @@ class TextEntryModel : WatchdogTimer, IDisposable
 
 The previous model *is a* `WatchdogTimer` through inheritance. In this model, a class *has a* `WatchdogTimer` instead. This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
 
-The model below achieves parity by subscribing to the `EpochFinalizing` event. In the body of its handle for the event, a single call to `await EpochInvokeAsync(async () => { ... })` enqueues asynchronous work into a FIFO settlement queue. The epoch completes only after the queue drains.
+The model below achieves parity by subscribing to the `EpochFinalizing` event. In the body of its handle for the event, a call to `await EpochInvokeAsync(async () => { ... })` enqueues asynchronous work into a FIFO settlement queue. The epoch completes only after the queue drains.
 
-Typically, handlers run synchronously and will yield at the first sign of an `await` so _this is key:_ awaiting `EpochInvokeAsync` must be the _first_ yield within the block. 
+Event handlers themselves should remain synchronous. They should not await directly. Instead, they enqueue asynchronous participation through the event args. This preserves the notification semantics of the event while allowing structured, cooperative async work within the epoch boundary.
 
 ```
-
-wdt.EpochFinalizing += async(sender, e) =>
+wdt.EpochFinalizing += (sender, e) =>
 {
-    // Any work performed prior to the await *must* be synchronous.
-    Thread.Sleep(TimeSpan.FromSeconds(1)); // Not a problem!
-
-    await e.EpochInvokeAsync(async () =>
+    // Fire and forget here, but legitimately awaited in the event class.
+    _ = e.EpochInvokeAsync(async () =>
     {
         // Any sequence of synchronous and asynchronous work - Not a problem!
         await Task.Delay(TimeSpan.FromSeconds(1));
         Thread.Sleep(TimeSpan.FromSeconds(1));    
         await Task.Delay(TimeSpan.FromSeconds(1));
     });
-
-    // Performing additional work upon resume is not advised.
 };
 ```
-**Not allowed**: Any _additional_ calls to `EpochInvokeAsync(async () =>{ ... })` 
-**Not advised**: Any _additional_ sync or async work _in this handler_.
 
-> We say this is advisory - continuation work is perfectly legal and has deterministic timing. But that timing _might not be what you think_ and it's better to stick to the known path.
 ___
 
 #### Example
 
 ```csharp
-public class TextEntryModelByComposition : IDisposable
+class TextEntryModelByComposition : IDisposable
 {
     public TextEntryModelByComposition()
     {
-        _wdt.EpochFinalizing += async (sender, e) => await CommitEpochAsync(e);
+        _wdt.EpochFinalizing += (sender, e) => CommitEpoch(e);
         _dhost.GetToken();
     }
 
@@ -242,17 +234,16 @@ public class TextEntryModelByComposition : IDisposable
     }
     string _inputText = string.Empty;
 
-    private async Task CommitEpochAsync(EpochFinalizingAsyncEventArgs e)
+    private void CommitEpoch(EpochFinalizingAsyncEventArgs e)
     {
         if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
         {
-            await e.EpochInvokeAsync(async () =>
+            _ = e.EpochInvokeAsync(async () =>
             { 
                 var acnx = await _dhost.GetCnx();
                 var recordset = await acnx.QueryAsync<Item>(
                     "SELECT * FROM Item WHERE Description LIKE ?",
                     $"%{InputText}%");
-
                 Items.Clear();
                 foreach (var item in recordset)
                 {
@@ -261,7 +252,6 @@ public class TextEntryModelByComposition : IDisposable
             });
         }
     }
-
     public void Dispose() => _dhost.Tokens.Single().Dispose();
 }
 ```
