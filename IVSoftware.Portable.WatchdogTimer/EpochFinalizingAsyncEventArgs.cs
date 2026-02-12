@@ -43,7 +43,6 @@ namespace IVSoftware.Portable
         private readonly AsyncLocal<bool> _inEpochInvoke = new AsyncLocal<bool>();
         private readonly SemaphoreSlim _fifo = new SemaphoreSlim(1, 1);
 
-
         /// <summary>
         /// Use this method inside an EpochFinalizing handler to prolong the epoch
         /// with structured, ordered asynchronous work.
@@ -61,6 +60,7 @@ namespace IVSoftware.Portable
         /// method, or invoked after the epoch has completed, does not participate
         /// in settlement.
         /// </remarks>
+        [Obsolete]
         public async Task EpochInvokeAsync(Func<Task> asyncAction, TimeSpan? timeout = null)
         {
             if(TCS.Task.IsCompleted)
@@ -122,7 +122,18 @@ but outside the awaited epoch boundary.
                 _inEpochInvoke.Value = false;
             }
         }
-        public void EnqueueTask(Func<Task> task) => Awaitables.Enqueue(task);
+
+        public event Func<Task> QueueEpochTask
+        {
+            add
+            {
+                EpochFinalizeQueue.Add(value);
+            }
+            remove
+            {
+                EpochFinalizeQueue.Remove(value);
+            }
+        }
 
         #region I N T E R N A L 
         /// <summary>
@@ -131,7 +142,7 @@ but outside the awaited epoch boundary.
         internal TaskCompletionSource<TaskStatus> TCS { get; }
         internal EventArgs UserEventArgs { get; }
 
-        internal Queue<Func<Task>> Awaitables { get; } = new Queue<Func<Task>>();
+        internal List<Func<Task>> EpochFinalizeQueue { get; } = new ();
 
         #endregion I N T E R N A L
     }
