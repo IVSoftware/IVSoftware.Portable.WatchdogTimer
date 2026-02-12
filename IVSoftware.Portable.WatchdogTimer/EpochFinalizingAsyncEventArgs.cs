@@ -39,101 +39,7 @@ namespace IVSoftware.Portable
 
         public bool IsCanceled { get; }
 
-
-        private readonly AsyncLocal<bool> _inEpochInvoke = new AsyncLocal<bool>();
-        private readonly SemaphoreSlim _fifo = new SemaphoreSlim(1, 1);
-
-        /// <summary>
-        /// Use this method inside an EpochFinalizing handler to prolong the epoch
-        /// with structured, ordered asynchronous work.
-        /// </summary>
-        /// <remarks>
-        /// Quick start rules:
-        /// 
-        /// - Call <see cref="EpochInvokeAsync"/> exactly once per handler invocation.
-        /// - Do not await (yield) before calling this method.
-        /// - Place all synchronous and asynchronous work that must participate in
-        ///   the epoch inside the supplied delegate.
-        /// 
-        /// Each call enters a FIFO queue and is awaited in order. The epoch completes
-        /// only after all queued delegates have finished. Work started outside this
-        /// method, or invoked after the epoch has completed, does not participate
-        /// in settlement.
-        /// </remarks>
-        [Obsolete]
-        public async Task EpochInvokeAsync(Func<Task> asyncAction, TimeSpan? timeout = null)
-        {
-            if(TCS.Task.IsCompleted)
-            {
-                var msg = @"
-See the Quick Start rules in the method documentation:
-- Call EpochInvokeAsync before yielding.
-- Participation must be declared synchronously within the handler.
-
-EpochInvokeAsync was invoked after the epoch had already completed
-(allowing any awaiting callers to resume).
-
-If this Throw is handled, the delegate will execute,
-but outside the awaited epoch boundary.
-".TrimStart();
-
-                if (this.ThrowHard<InvalidOperationException>(msg).Handled)
-                {   /* G T K */
-                    // Throw suppressed.
-                    // Epoch has already completed.
-                    // Awaiting callers have resumed.
-                    // This delegate will execute but will not be awaited.
-                }
-            }
-            timeout ??= TimeSpan.FromSeconds(10);
-
-            bool acquired = false;
-            bool reentrant = _inEpochInvoke.Value;
-
-            try
-            {
-                if (reentrant)
-                {
-                    this.ThrowHard<InvalidOperationException>(
-                        "EpochInvokeAsync cannot be called reentrantly within the same epoch.");
-                }
-                else
-                {
-                    acquired = await _fifo.WaitAsync(timeout.Value);
-
-                    if (acquired)
-                    {
-                        _inEpochInvoke.Value = true;
-                        await asyncAction();
-                    }
-                    else
-                    {
-                        this.ThrowHard<TimeoutException>();
-                    }
-                }
-            }
-            finally
-            {
-                if (acquired)
-                {
-                    _fifo.Release();
-                }
-
-                _inEpochInvoke.Value = false;
-            }
-        }
-
-        public event Func<Task> QueueEpochTask
-        {
-            add
-            {
-                EpochFinalizeQueue.Add(value);
-            }
-            remove
-            {
-                EpochFinalizeQueue.Remove(value);
-            }
-        }
+        public void QueueEpochTask(Func<Task> task) => EpochFinalizeQueue.Enqueue(task);
 
         #region I N T E R N A L 
         /// <summary>
@@ -142,7 +48,11 @@ but outside the awaited epoch boundary.
         internal TaskCompletionSource<TaskStatus> TCS { get; }
         internal EventArgs UserEventArgs { get; }
 
-        internal List<Func<Task>> EpochFinalizeQueue { get; } = new ();
+        /// <remarks>
+        /// No lock required. By the time this is accessed, the event 
+        /// is offline and not subject to the vagaries of concurrency.
+        /// </remarks>
+        internal Queue<Func<Task>> EpochFinalizeQueue { get; } = new ();
 
         #endregion I N T E R N A L
     }

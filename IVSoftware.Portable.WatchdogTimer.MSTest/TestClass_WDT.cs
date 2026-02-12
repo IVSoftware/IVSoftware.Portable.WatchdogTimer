@@ -505,7 +505,7 @@ namespace IVSoftware.Portable.MSTest
             /// Connection point 1
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
                 });
@@ -513,7 +513,7 @@ namespace IVSoftware.Portable.MSTest
             /// Connection point 2
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
                 });
@@ -521,7 +521,7 @@ namespace IVSoftware.Portable.MSTest
 
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
@@ -590,7 +590,7 @@ namespace IVSoftware.Portable.MSTest
                 {
                     await Task.Delay(TimeSpan.FromMilliseconds(1)); // Yields the awaiter.
                 }
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(1)); // Not a problem!
                     Thread.Sleep(TimeSpan.FromSeconds(1));     // Not a problem!

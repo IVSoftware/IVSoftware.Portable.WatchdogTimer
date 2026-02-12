@@ -49,7 +49,7 @@ namespace IVSoftware.Portable.MSTest.Models
             if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
             {
                 // Fire and forget here, but legitimately awaited in the event class.
-                _ = e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 { 
                     var acnx = await _dhost.GetCnx();
                     var recordset = await acnx.QueryAsync<Item>(
