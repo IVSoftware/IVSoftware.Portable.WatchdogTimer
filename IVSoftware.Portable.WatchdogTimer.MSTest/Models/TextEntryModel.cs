@@ -9,8 +9,9 @@ using System.Threading.Tasks;
 
 namespace IVSoftware.Portable.MSTest.Models
 {
-
-    class TextEntryModel : WatchdogTimer, IDisposable
+    class TextEntryModel
+        : WatchdogTimer
+        , IDisposable // Encapsulates a disposable SQLiteAsyncConnection for test.
     {
         public TextEntryModel()
         {

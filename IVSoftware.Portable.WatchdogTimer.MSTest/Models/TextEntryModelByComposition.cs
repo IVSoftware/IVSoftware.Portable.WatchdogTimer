@@ -10,12 +10,12 @@ using System.Threading.Tasks;
 
 namespace IVSoftware.Portable.MSTest.Models
 {
-
-    class TextEntryModelByComposition : IDisposable
+    class TextEntryModelByComposition 
+        : IDisposable  // Encapsulates a disposable SQLiteAsyncConnection for test.
     {
         public TextEntryModelByComposition()
         {
-            _wdt.EpochFinalizing +=  (sender, e) => CommitEpoch(e);
+            _wdt.EpochFinalizing +=  (sender, e) => WDT_EpochFinalizing(e);
             _dhost.GetToken();
         }
 
@@ -44,11 +44,11 @@ namespace IVSoftware.Portable.MSTest.Models
         }
         string _inputText = string.Empty;
 
-        private void CommitEpoch(EpochFinalizingAsyncEventArgs e)
+        private void WDT_EpochFinalizing(EpochFinalizingAsyncEventArgs e)
         {
             if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
             {
-                // Fire and forget here, but legitimately awaited in the event class.
+                // Add to FIFO of ordered awaitables to execute within the current epoch.
                 e.QueueEpochTask(async () =>
                 { 
                     var acnx = await _dhost.GetCnx();

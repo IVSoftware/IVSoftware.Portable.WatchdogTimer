@@ -73,6 +73,8 @@ Common use cases include:
 - Test scenarios involving the WDT itself, or components that depend on it, where deterministic completion is required.
 - Atomic asynchronous workflows in which epoch settlement represents the start of a broader asynchronous operation rather than its conclusion.
 
+> **Example** The UI allows a user to enter text causing an async query once the text changes settle. The goal is to signal awaited when the thread resumes after the query.
+
 ### Awaitable Workflow Example
 
 First, create an arbitrary `TextInputModel` class that inherits `WatchdogTimer` where any change to the `InputText` property kicks the WDT.
@@ -90,13 +92,14 @@ This unit test demonstrates how synchronous step #1 can be immediately awaited i
 [TestMethod]
 public async Task Test_TextEntryModel()
 {
-    string actual, expected;
-    TextEntryModel entry = new();
+    TextEntryModel entry = new(); 
+
     entry.InputText = "hello";
     await entry;
+
     // SERIALIZE the items list to compare its contents to an expected JSON string.
-    actual = JsonConvert.SerializeObject(entry.Items);
-    expected = @"[{""Id"":1,""Description"":""Hello""}]";
+    var actual = JsonConvert.SerializeObject(entry.Items);
+    var expected = @"[{""Id"":1,""Description"":""Hello""}]";
     Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
 }
 ```
@@ -122,7 +125,9 @@ This approach is appropriate when the type's identity and behavior are naturally
 
 
 ```
-class TextEntryModel : WatchdogTimer, IDisposable
+class TextEntryModel
+    : WatchdogTimer
+    , IDisposable // Encapsulates a disposable SQLiteAsyncConnection for test.
 {
     public TextEntryModel()
     {
@@ -186,14 +191,17 @@ Event handlers themselves should remain synchronous. They should not await direc
 wdt.EpochFinalizing += (sender, e) =>
 {
     // Fire and forget here, but legitimately awaited in the event class.
-    _ = e.EpochInvokeAsync(async () =>
+    e.EpochInvokeAsync(async () =>
     {
-        // Any sequence of synchronous and asynchronous work - Not a problem!
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        Thread.Sleep(TimeSpan.FromSeconds(1));    
-        await Task.Delay(TimeSpan.FromSeconds(1));
+        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
+        {
+            // Add to FIFO of ordered awaitables to execute within the current epoch.
+            e.QueueEpochTask(MyFinalizer);
+        }
     });
 };
+
+async Task MyFinalizer(){ ... }
 ```
 
 ___
@@ -201,11 +209,12 @@ ___
 #### Example
 
 ```csharp
-class TextEntryModelByComposition : IDisposable
+class TextEntryModelByComposition 
+    : IDisposable  // Encapsulates a disposable SQLiteAsyncConnection for test.
 {
     public TextEntryModelByComposition()
     {
-        _wdt.EpochFinalizing += (sender, e) => CommitEpoch(e);
+        _wdt.EpochFinalizing +=  (sender, e) => WDT_EpochFinalizing(e);
         _dhost.GetToken();
     }
 
@@ -234,11 +243,12 @@ class TextEntryModelByComposition : IDisposable
     }
     string _inputText = string.Empty;
 
-    private void CommitEpoch(EpochFinalizingAsyncEventArgs e)
+    private void WDT_EpochFinalizing(EpochFinalizingAsyncEventArgs e)
     {
         if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
         {
-            _ = e.EpochInvokeAsync(async () =>
+            // Add to FIFO of ordered awaitables to execute within the current epoch.
+            e.QueueEpochTask(async () =>
             { 
                 var acnx = await _dhost.GetCnx();
                 var recordset = await acnx.QueryAsync<Item>(
@@ -256,17 +266,14 @@ class TextEntryModelByComposition : IDisposable
 }
 ```
 
-When used as directed, the mental model is simple:
+The mental model is simple:
 
 1. The synchronous `EpochFinalizing` event can be made to behave "just like" a subclass that overrides `OnEpochFinalizing`. 
-2. To extend the awaited epoch and perform work _inside that timeline_, make a call to `e.EpochInvokeAsync` immediately and exclusively within the handler.
-
-Work performed outside that boundary is considered detached and will not delay awaiting callers.
-
+2. To extend the awaited epoch and perform work _inside that timeline_, queue the async workload inside the handler.
 ___
 
 
-## More Examples
+## More Examples - From the Original Library
 
 **Display an alert after user moves the mouse**
 
@@ -545,31 +552,30 @@ public event PropertyChangedEventHandler PropertyChanged;
     - Consider using a singleton pattern to initialize using non-static properties of the instance.
 
 ```csharp
-
-        /// <summary>
-        /// Instantiate using singleton pattern.
-        /// </summary>
-        public WatchdogTimer WatchdogTimer
+/// <summary>
+/// Instantiate using singleton pattern.
+/// </summary>
+public WatchdogTimer WatchdogTimer
+{
+    get
+    {
+        if (_watchdogTimer is null)
         {
-            get
-            {
-                if (_watchdogTimer is null)
+            _watchdogTimer = new WatchdogTimer(
+                defaultInitialAction: () =>
                 {
-                    _watchdogTimer = new WatchdogTimer(
-                        defaultInitialAction: () =>
-                        {
-                            Console.WriteLine("Timer Started");
-                        },
-                        defaultCompleteAction: () =>
-                        {
-                            Console.WriteLine("Timer Completed");
-                        }
-                    );
+                    Console.WriteLine("Timer Started");
+                },
+                defaultCompleteAction: () =>
+                {
+                    Console.WriteLine("Timer Completed");
                 }
-                return _watchdogTimer;
-            }
+            );
         }
-        WatchdogTimer _watchdogTimer = default;
+        return _watchdogTimer;
+    }
+}
+WatchdogTimer _watchdogTimer = default;
 ```
 
 
