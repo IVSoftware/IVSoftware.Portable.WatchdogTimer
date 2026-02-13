@@ -51,33 +51,43 @@ public class TestClass_ReadMeClaims
     {
         TaskCompletionSource tcsSimStarted = new(); // Will ensure that the test enters the simulation.
         Stopwatch stopwatch = new(); // Measure epoch for test.
-        TextBoxAwaitable textBox = new();
+        TextBoxAwaitable textBox = new TextBoxAwaitable {  Interval = TimeSpan.FromSeconds(0.5) };
         textBox.EpochInitialized += (sender, e) =>
         {
             stopwatch.Start();
             tcsSimStarted.TrySetResult();
         };
 
-        // Simulate keystrokes that would normally occur on the UI thread.
-        // - Do not await here. This is just a burst of keystrokes in the wild.
-        _ = Task.Run(async () =>
-        {
-            textBox.Clear();
-            StringBuilder sb = new ();
-            foreach (var c in new[] { 'g', 'r', 'e', 'e', 'n' })
-            {
-                await Task.Delay(TimeSpan.FromSeconds(0.25));
-                sb.Append(c);
-                textBox.Text = sb.ToString();
-            }
-        });
+        await subtestSimulateTyping("green");
 
-        // Without awaiting, this test would return immediately
-        // (the fire-and-forget input simulation may not execute at all).
-        await tcsSimStarted.Task;
-        await textBox; // Await deterministic epoch settlement.
-        stopwatch.Stop();
-        tcsSimStarted = new(); // Ready for more cases.
-        { }
+        #region S U B T E S T S 
+        async Task subtestSimulateTyping(string inputText)
+        {
+            // Simulate keystrokes that would normally occur on the UI thread.
+            // - Do not await here. This is just a burst of keystrokes in the wild.
+            _ = Task.Run(async () =>
+            {
+                textBox.Clear();
+                StringBuilder sb = new();
+
+                int i = 0;
+                while (i < inputText.Length - 1)
+                {
+                    sb.Append(inputText[i++]);
+                    await Task.Delay(TimeSpan.FromSeconds(0.25));
+                    textBox.Text = sb.ToString();
+                }
+                sb.Append(inputText[i]);
+                textBox.Text = sb.ToString();
+            });
+
+            // Without awaiting, this test would return immediately
+            // (the fire-and-forget input simulation may not execute at all).
+            await tcsSimStarted.Task;
+            await textBox; // Await deterministic epoch settlement.
+            stopwatch.Stop();
+            tcsSimStarted = new(); // Ready for more cases.
+        }
+        #endregion S U B T E S T S
     }
 }

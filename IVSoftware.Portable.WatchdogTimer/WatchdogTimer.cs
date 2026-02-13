@@ -8,9 +8,9 @@ using System.Threading.Tasks;
 
 namespace IVSoftware.Portable
 {
-    public class WatchdogTimer 
-        : IAwaitableEpoch
-        , INotifyPropertyChanged
+    public class WatchdogTimer
+            : IAwaitableEpoch
+            , INotifyPropertyChanged
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="WatchdogTimer"/> class with optional default actions for the initial and completion phases.
@@ -107,11 +107,11 @@ namespace IVSoftware.Portable
                 InitializeEpoch();
                 OnEpochInitialized();
             }
-            if(completeAction is not null)
+            if (completeAction is not null)
             {
                 CompleteAction = completeAction;
             }
-            if(e is not null)
+            if (e is not null)
             {
                 UserEventArgs = e;
             }
@@ -140,7 +140,7 @@ namespace IVSoftware.Portable
                         // Subclass organic virtual method.
                         await OnEpochFinalizingAsync(e);
 
-                        while(e.EpochFinalizeQueue.Count != 0)
+                        while (e.EpochFinalizeQueue.Count != 0)
                         {
                             await (e.EpochFinalizeQueue.Dequeue()).Invoke();
                         }
@@ -205,7 +205,7 @@ namespace IVSoftware.Portable
         {
             Action completeAction;
             EventArgs eventArgs;
-            lock(_lock)
+            lock (_lock)
             {
                 Running = false; // Mark timer as no longer running
                 completeAction = CompleteAction ?? DefaultCompleteAction;
@@ -224,10 +224,10 @@ namespace IVSoftware.Portable
             Cancelled?.Invoke(this, EventArgs.Empty);
 
             var e = new EpochFinalizingAsyncEventArgs(TakeSnapshot(isCanceled: true));
-            OnEpochFinalizingAsync(e).GetAwaiter().OnCompleted(() => 
+            OnEpochFinalizingAsync(e).GetAwaiter().OnCompleted(() =>
             {
                 e.TCS.TrySetResult(TaskStatus.Canceled);
-            }); 
+            });
         }
         #endregion O V E R R I D E S
 

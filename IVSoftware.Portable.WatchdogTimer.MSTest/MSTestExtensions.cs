@@ -10,14 +10,13 @@ namespace IVSoftware.Portable.MSTest
 {
     static class MSTestExtensions
     {
-        public static TimeSpan ExecStartOrRestartLoop(this WatchdogTimer @this, int loopN = 10, TimeSpan? delay = null)
+        public static TimeSpan ExecStartOrRestartLoop(this IAwaitableEpoch @this, int loopN = 10, TimeSpan? delay = null)
         {
             Assert.IsTrue(
                 loopN >= 1,
                 "Expecting loopN must be greater than or equal to 1.");
 
             delay ??= TimeSpan.FromSeconds(0.25);
-            TimeSpan dwell = @this.Interval + ((loopN - 1) * (TimeSpan)delay);
 
             _ = localStartOrRestart();
             async Task localStartOrRestart()
@@ -31,10 +30,20 @@ namespace IVSoftware.Portable.MSTest
                 @this.StartOrRestart();
                 Assert.IsTrue(@this.Running);
             }
+            return IdealEpochTimeSpan(@this, loopN, (TimeSpan)delay);
+        }
+        public static TimeSpan ExecStartOrRestartLoop(this IAwaitableEpoch @this, string inputString, TimeSpan? delay = null)
+            => @this.ExecStartOrRestartLoop(inputString.Length, delay);
+
+        public static TimeSpan IdealEpochTimeSpan(this IAwaitableEpoch @this, int loopN, TimeSpan delay)
+        {
+            TimeSpan dwell = @this.Interval + ((loopN - 1) * (TimeSpan)delay);
             return dwell;
         }
-        public static TimeSpan ExecStartOrRestartLoop(this WatchdogTimer @this, string inputString, TimeSpan? delay = null)
-            => @this.ExecStartOrRestartLoop(inputString.Length, delay);
+
+        public static TimeSpan IdealEpochTimeSpan(this IAwaitableEpoch @this, string inputString, TimeSpan delay)
+            => IdealEpochTimeSpan(@this, inputString.Length, delay);
+
         public static T DequeueSingle<T>(this Queue<T> queue)
         {
             switch (queue.Count)
