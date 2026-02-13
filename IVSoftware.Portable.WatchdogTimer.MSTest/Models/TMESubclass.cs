@@ -128,9 +128,10 @@ namespace IVSoftware.Portable.MSTest.Models
     class TextBoxAwaitable
         : TextBoxAwaitableBaseClass
     {
+        public TimeSpan AsyncFinalizationPeriod {  get; set; } = TimeSpan.FromSeconds(1);
         protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
         {
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            await Task.Delay(AsyncFinalizationPeriod);
             await base.OnEpochFinalizingAsync(e);
         }
     }

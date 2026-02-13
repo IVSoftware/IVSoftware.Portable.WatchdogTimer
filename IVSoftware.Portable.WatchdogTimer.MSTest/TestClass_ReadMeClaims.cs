@@ -122,7 +122,11 @@ public class TestClass_ReadMeClaims
             asyncFinalizationPeriod = TimeSpan.FromSeconds(1);
 
         // Different!
-        var textBox = new TextBoxAwaitable{ Interval = inputSettleInterval };
+        var textBox = new TextBoxAwaitable
+        { 
+            Interval = inputSettleInterval,
+            AsyncFinalizationPeriod = asyncFinalizationPeriod,
+        };
 
         textBox.EpochInitialized += (sender, e) =>
         {
