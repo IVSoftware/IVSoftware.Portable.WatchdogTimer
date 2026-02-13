@@ -13,6 +13,10 @@ public class TestClass_ReadMeClaims
         TaskCompletionSource tcsSimStarted = new(); // Will ensure that the test enters the simulation.
         StringBuilder inputText = new();
         Stopwatch stopwatch = new(); // Measure epoch for test.
+        TimeSpan 
+            inputSettleInterval = TimeSpan.FromSeconds(0.5),
+            inputCharacterPeriod = TimeSpan.FromSeconds(0.25);
+
         var wdt = new WatchdogTimer(
             defaultInitialAction: () =>
             {
@@ -22,10 +26,9 @@ public class TestClass_ReadMeClaims
             defaultCompleteAction: () =>
             {
                 Debug.WriteLine($"@{stopwatch.Elapsed.TotalSeconds} Settled Text: {inputText}");
-                tcsSimStarted = new(); // Housekeeping - sets up the next potential test case.
             })
         {
-            Interval = TimeSpan.FromSeconds(0.5)
+            Interval = inputSettleInterval
         };
         // Simulate keystrokes that would normally occur on the UI thread.
         // - Do not await here. This is just a burst of keystrokes in the wild.
@@ -44,6 +47,11 @@ public class TestClass_ReadMeClaims
         // (the fire-and-forget input simulation may not execute at all).
         await tcsSimStarted.Task;
         await wdt; // Await deterministic epoch settlement.
+        stopwatch.Stop();
+
+        var expected = wdt.EpochTimeSpanExpected("green", inputCharacterPeriod);
+        Assert.IsTrue(TimeSpan.FromSeconds(stopwatch.Elapsed.TotalSeconds) >= expected, "Expecting a minimum settle time.");
+        Assert.IsTrue(TimeSpan.FromSeconds(stopwatch.Elapsed.TotalSeconds) <= expected + TimeSpan.FromSeconds(0.5), "Expecting a maximum settle time window.");
     }
 
     [TestMethod]
@@ -51,7 +59,7 @@ public class TestClass_ReadMeClaims
     {
         TaskCompletionSource tcsSimStarted = new(); // Will ensure that the test enters the simulation.
         Stopwatch stopwatch = new(); // Measure epoch for test.
-        TextBoxAwaitable textBox = new TextBoxAwaitable {  Interval = TimeSpan.FromSeconds(0.5) };
+        TextBoxAwaitableBaseClass textBox = new TextBoxAwaitable {  Interval = TimeSpan.FromSeconds(0.5) };
         textBox.EpochInitialized += (sender, e) =>
         {
             stopwatch.Start();

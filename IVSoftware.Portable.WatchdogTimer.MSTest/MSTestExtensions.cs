@@ -41,7 +41,7 @@ namespace IVSoftware.Portable.MSTest
             return dwell;
         }
 
-        public static TimeSpan IdealEpochTimeSpan(this IAwaitableEpoch @this, string inputString, TimeSpan delay)
+        public static TimeSpan EpochTimeSpanExpected(this IAwaitableEpoch @this, string inputString, TimeSpan delay)
             => IdealEpochTimeSpan(@this, inputString.Length, delay);
 
         public static T DequeueSingle<T>(this Queue<T> queue)
