@@ -1,11 +1,6 @@
 ﻿using IVSoftware.Portable.Common.Exceptions;
-using IVSoftware.Portable.Disposable;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.Contracts;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace IVSoftware.Portable
@@ -15,20 +10,16 @@ namespace IVSoftware.Portable
     /// without altering the operational semantics of WatchdogTimer.
     /// </summary>
     /// <remarks>
-    /// Provides an awaitable completion boundary for epoch finalization. If no asynchronous
-    /// participation is introduced, awaiting completes immediately. When copied from another
-    /// async-aware instance, existing finalization state is preserved to maintain continuity
-    /// of the timer epoch.
+    /// - The watchdog timer provides an awaitable completion boundary for epoch finalization. 
+    /// - Participation is introduced by adding async workloads to the FIFO.
+    /// - Upon return from the handler, this collection is sealed and tasks are consecutively 
+    ///   awaited in the order they were received.
     /// </remarks>
     public sealed class EpochFinalizingAsyncEventArgs : EventArgs
     {
         /// <summary>
         /// Initializes finalize arguments with a settled default.
         /// </summary>
-        /// <remarks>
-        /// If no asynchronous participation is introduced, awaiting this instance
-        /// completes immediately.
-        /// </remarks>
         internal EpochFinalizingAsyncEventArgs(
             EpochFinalizationSnapshot snapshot)
         {
@@ -39,6 +30,9 @@ namespace IVSoftware.Portable
 
         public bool IsCanceled { get; }
 
+        /// <summary>
+        /// Adds an async workload to the finalization FIFO.
+        /// </summary>
         public void QueueEpochTask(Func<Task> task) => EpochFinalizeQueue.Enqueue(task);
 
         #region I N T E R N A L 
@@ -53,8 +47,47 @@ namespace IVSoftware.Portable
         /// is offline and not subject to the vagaries of concurrency.
         /// </remarks>
         internal Queue<Func<Task>> EpochFinalizeQueue { get; } = new ();
-
         #endregion I N T E R N A L
+
+        #region D E P R E C A T E D 
+#if ABSTRACT
+            // From the documentation for 1.3.1-beta
+            await e.EpochInvokeAsync(async () =>
+            { 
+                var acnx = await _dhost.GetCnx();
+                var recordset = await acnx.QueryAsync<Item>(
+                    "SELECT * FROM Item WHERE Description LIKE ?",
+                    $"%{InputText}%");
+                Items.Clear();
+                foreach (var item in recordset)
+                {
+                    Items.Add(item);
+                }
+            });
+#endif
+
+        [Obsolete("Use QueueEpochTask to register async workloads for epoch finalization.")]
+        public Task EpochInvokeAsync(Func<Task> task)
+        {
+            string msg = @"
+This method is:
+- Retained for compatibility.
+- Still functional - the specified task will be enqueued to the finalization FIFO.
+- Superseded by a simplified model using a void-returning registration method.
+
+If prior call sites marked the EpochFinalizing handler async only
+to await EpochInvokeAsync, that await is now unnecessary.
+The handler may be restored to a synchronous form, and the workload
+registered via QueueEpochTask. Await the WatchdogTimer itself
+for deterministic settlement.
+".TrimStart();
+
+            this.Advisory(msg);
+
+            QueueEpochTask(task);
+            return Task.CompletedTask;
+        }
+        #endregion D E P R E C A T E D
     }
 
     /// <summary>

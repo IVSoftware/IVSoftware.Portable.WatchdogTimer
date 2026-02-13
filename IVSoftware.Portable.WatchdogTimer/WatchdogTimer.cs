@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 
 namespace IVSoftware.Portable
 {
-    public class WatchdogTimer : INotifyPropertyChanged
+    public class WatchdogTimer 
+        : IAwaitableEpoch
+        , INotifyPropertyChanged
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="WatchdogTimer"/> class with optional default actions for the initial and completion phases.

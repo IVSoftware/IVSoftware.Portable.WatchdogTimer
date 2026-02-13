@@ -96,14 +96,13 @@ namespace IVSoftware.Portable.MSTest
         {
             var stopwatch = new Stopwatch(); 
             double expectedTimeout;
-            double expectedElapsed;
+            TimeSpan expectedElapsed;
             await subtestSingletonWithInitialAndComplete();
             
             async Task subtestSingletonWithInitialAndComplete()
             {
                 var uut = new SingletonWithInitialAndComplete();
                 expectedTimeout = uut.WDT.Interval.TotalSeconds;
-                expectedElapsed = 10 * 0.25 + expectedTimeout;
 
                 Assert.IsFalse(uut.WDT.Running);
 
@@ -115,7 +114,7 @@ namespace IVSoftware.Portable.MSTest
                     uut.EventQueue.DequeueSingleWDTTestEvent().WDTEventId,
                     "Expecting WDT to raise Initial event id.");
 
-                uut.WDT.ExecStartOrRestartLoop();
+                expectedElapsed = uut.WDT.ExecStartOrRestartLoop();
                 await uut;
                 stopwatch.Stop();
 
@@ -126,14 +125,14 @@ namespace IVSoftware.Portable.MSTest
                     uut.EventQueue.DequeueSingleWDTTestEvent().WDTEventId,
                     "Expecting WDT to raise Complete event id.");
 
-                var elapsed = stopwatch.Elapsed.TotalSeconds;
+                var elapsed = TimeSpan.FromSeconds(stopwatch.Elapsed.TotalSeconds);
 
                 // [Careful]
                 // Works only if you haven't paused the
                 // test (like with debug breakpoints).
                 Assert.IsTrue(
-                    elapsed > expectedElapsed - 0.5 && elapsed < expectedElapsed + 0.5,
-                    $"Elapsed time out of expected range: {elapsed:N2} sec");
+                    elapsed > expectedElapsed - TimeSpan.FromSeconds(0.5) && elapsed < expectedElapsed + TimeSpan.FromSeconds(0.5),
+                    $"Elapsed time out of expected range: {elapsed} sec");
 
                 Assert.AreEqual(2, uut.Toggle);
 
@@ -552,46 +551,5 @@ namespace IVSoftware.Portable.MSTest
     {
         Initial,
         Complete,
-    }
-    static class MSTestExtensions
-    {
-        public static void ExecStartOrRestartLoop(this WatchdogTimer @this, int loopN = 10, TimeSpan? delay = null)
-        {
-            delay ??= TimeSpan.FromSeconds(0.25);
-            _ = localStartOrRestart();
-            async Task localStartOrRestart()
-            {
-                for (int i = 0; i < loopN; i++)
-                {
-                    await Task.Delay((TimeSpan)delay);
-                    Assert.IsTrue(@this.Running);
-                    @this.StartOrRestart();
-                }
-            }
-        }
-        public static T DequeueSingle<T>(this Queue<T> queue)
-        {
-            switch (queue.Count)
-            {
-                case 0:
-                    throw new InvalidOperationException("Queue is empty.");
-                case 1:
-                    return queue.Dequeue();
-                default:
-                    throw new InvalidOperationException("Multiple items in queue.");
-            }
-        }
-        public static WDTTestEventArgs DequeueSingleWDTTestEvent(this Queue<SenderEventPair> queue)
-        {
-            switch (queue.Count)
-            {
-                case 0:
-                    throw new InvalidOperationException("Queue is empty.");
-                case 1:
-                    return (WDTTestEventArgs)queue.Dequeue().e;
-                default:
-                    throw new InvalidOperationException("Multiple items in queue.");
-            }
-        }
     }
 }
