@@ -12,6 +12,22 @@ Examples:
 - File system change bursts
 - Hardware polling
 
+___
+
+## New Features in Release 1.3.1
+
+1. Subclassing is streamlined through protected virtual lifecycle methods:
+
+- `OnEpochInitialized()`
+- `OnRanToCompletion()`
+- `OnCanceled()`
+
+2. `WatchdogTimer` is awaitable. Developers may find this especially useful for testing their apps. 
+3. Optional advanced asynchronous epoch finalization via override:
+
+   `protected override Task OnEpochFinalizingAsync(
+        EpochFinalizingAsyncEventArgs e)`
+
 ___ 
 
 ## Level 1 — Simple Debounce (90% Use Case)
@@ -147,231 +163,94 @@ public async Task Test_SimpleDebounce()
     await wdt; // Await deterministic epoch settlement.
 }
 ```
----
 
-## New Virtual Methods in this Release
+Eliminates the need for:
 
-Beginning with version 1.3.1, subclassing is facilitated by exposing lifecycle hooks through protected virtual methods:
-
-- OnEpochInitialized()
-- OnRanToCompletion()
-- OnCanceled()
+- `Task.Delay`
+- Polling
+- Timing guesses
 
 ---
 
-# New Added Features for Testing and Power User Applications
+# Level 2 — Structured Async Coordination (Advanced)
 
-`WatchdogTimer` has always been simple to use and still is.
+If you stop reading here, you already have a solid debounce timer.
 
-The features that follow introduce awaitable behavior and structured epoch participation. These capabilities are intended for testing scenarios and advanced asynchronous workflows.
-
-If you only need a restartable debounce timer with `RanToCompletion` and `Cancelled` events, you can safely stop reading here. Everything above this point is the primary, straightforward usage model.
-
-The sections below describe a more powerful — and more opinionated — execution model.
-
-___
-
-## Await Semantics
-
-Beginning with version 1.3.1, the `WatchdogTimer` (WDT) class may be awaited.
-
-At first glance, this can appear counterintuitive in an event-driven design. However, awaiting the WDT provides a well-defined synchronization point that is difficult to express using events alone.
-
-Common use cases include:
-
-- Test scenarios involving the WDT itself, or components that depend on it, where deterministic completion is required.
-- Atomic asynchronous workflows in which epoch settlement represents the start of a broader asynchronous operation rather than its conclusion.
-
-> **Example** The UI allows a user to enter text causing an async query once the text changes settle. The goal is to signal awaited when the thread resumes after the query.
-
-### Awaitable Workflow Example
-
-First, create an arbitrary `TextInputModel` class that inherits `WatchdogTimer` where any change to the `InputText` property kicks the WDT.
-
-Now, consider this unit testing scenario:
-
-1. The unit test starts by virtually typing into a text entry field.
-2. Each text change starts, or restarts, a settling interval.
-3. When quiescence signals that the simulated user has stopped typing, perform a query on an asynchronous SQLite connection.
-4. When execution resumes from the query, repopulate `Items` which is a bound observable collection.
-
-This unit test demonstrates how synchronous step #1 can be immediately awaited in the next line of code.
-
-```
-[TestMethod]
-public async Task Test_TextEntryModel()
-{
-    TextEntryModel entry = new(); 
-
-    entry.InputText = "hello";
-    await entry;
-
-    // SERIALIZE the items list to compare its contents to an expected JSON string.
-    var actual = JsonConvert.SerializeObject(entry.Items);
-    var expected = @"[{""Id"":1,""Description"":""Hello""}]";
-    Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
-}
-```
-
-___
-
-### Awaitable Override Semantics
-
-The `TextEntryModel` class performs this easily by overriding an awaitable method in the WDT base class:
-
-```
-protected virtual Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e, bool isCanceled) { }
-```
-
-The critical distinction is that this method runs _before_ the task completion source for the current epoch is set. So in this turnkey example class, the async database query runs within the epoch and allowing the `Items` list to be populated before signaling resume.
-
-
-### Awaitable by Inheritance Model
-
-In this model, the class itself *is* a `WatchdogTimer`. Epoch participation is expressed by overriding lifecycle hooks directly on the base class.
-
-This approach is appropriate when the type's identity and behavior are naturally centered around the timer itself, and when in-epoch work is an intrinsic responsibility of the class.
-
-
-```
-class TextEntryModel
-    : WatchdogTimer
-    , IDisposable // Encapsulates a disposable SQLiteAsyncConnection for test.
-{
-    public TextEntryModel()
-    {
-        Interval = TimeSpan.FromSeconds(0.25);
-        _dhost.GetToken();
-    }
-
-    private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
-    {
-        await acnx.CreateTableAsync<Item>();
-        await acnx.InsertAsync(new Item { Description = "Hello" });
-    });
-
-    public ObservableCollection<Item> Items { get; } = new();
-
-    public string InputText
-    {
-        get => _inputText;
-        set
-        {
-            if (!Equals(_inputText, value))
-            {
-                _inputText = value;
-                StartOrRestart();
-            }
-        }
-    }
-    string _inputText = string.Empty;
-
-    protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
-    {
-        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
-        {
-            var acnx = await _dhost.GetCnx();
-            var recordset = await acnx.QueryAsync<Item>(
-                "SELECT * FROM Item WHERE Description LIKE ?",
-                $"%{InputText}%");
-            Items.Clear();
-            foreach (var item in recordset)
-            {
-                Items.Add(item);
-            }
-        }
-        await base.OnEpochFinalizingAsync(e);
-    }
-
-    public void Dispose()=>_dhost.Tokens.Single().Dispose();
-}
-```
+Everything below this point is about coordinated async participation inside an epoch.
 
 ---
-### Awaitable by Composition Model
 
-The previous model *is a* `WatchdogTimer` through inheritance. In this model, a class *has a* `WatchdogTimer` instead. This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
+## The Concept of an Epoch
 
-The model below achieves parity by subscribing to the `EpochFinalizing` event. In the body of its handle for the event, a call to `await EpochInvokeAsync(async () => { ... })` enqueues asynchronous work into a FIFO settlement queue. The epoch completes only after the queue drains.
+An epoch begins when an idle `WatchdogTimer` receives `StartOrRestart`.
 
-Event handlers themselves should remain synchronous. They should not await directly. Instead, they enqueue asynchronous participation through the event args. This preserves the notification semantics of the event while allowing structured, cooperative async work within the epoch boundary.
+It ends when the most recent restart completes its `Interval`.
 
 ```
-wdt.EpochFinalizing += (sender, e) =>
-{
-    // Fire and forget here, but legitimately awaited in the event class.
-    e.EpochInvokeAsync(async () =>
-    {
-        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
-        {
-            // Add to FIFO of ordered awaitables to execute within the current epoch.
-            e.QueueEpochTask(MyFinalizer);
-        }
-    });
-};
-
-async Task MyFinalizer(){ ... }
+Start
+-> [Restart, Restart...]
+-> Dwell Interval 
+-> Raise synchronous `RanToCompletion` event
+-> Execute asynchronous finalization (if any)
+-> Complete awaitable boundary
 ```
+
+**Example — Awaitable Epoch Boundary**
+
+Scenario: A text entry control triggers an asynchronous query after input settles.
+
+1. The user enters text.
+2. The settled value determines the SQL query.
+3. The query executes asynchronously.
+4. Await resumes only after the query completes.
 
 ___
 
-#### Example
+
+## Inheritance Model
+
+This snippet shows a scenario where `TextEntryModel` *is a* `WatchdogTimer`.
 
 ```csharp
-class TextEntryModelByComposition 
-    : IDisposable  // Encapsulates a disposable SQLiteAsyncConnection for test.
+class TextEntryModel : WatchdogTimer
 {
-    public TextEntryModelByComposition()
+    protected override async Task OnEpochFinalizingAsync(
+        EpochFinalizingAsyncEventArgs e)
     {
-        _wdt.EpochFinalizing +=  (sender, e) => WDT_EpochFinalizing(e);
-        _dhost.GetToken();
-    }
-
-    private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
-    {
-        await acnx.CreateTableAsync<Item>();
-        await acnx.InsertAsync(new Item { Description = "Hello" });
-    });
-
-    WatchdogTimer _wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
-    public TaskAwaiter<TaskStatus> GetAwaiter() => _wdt.GetAwaiter();
-
-    public ObservableCollection<Item> Items { get; } = new();
-
-    public string InputText
-    {
-        get => _inputText;
-        set
+        if (!e.IsCanceled)
         {
-            if (!Equals(_inputText, value))
-            {
-                _inputText = value;
-                _wdt.StartOrRestart();
-            }
+            // Async work here participates in settlement
         }
-    }
-    string _inputText = string.Empty;
 
-    private void WDT_EpochFinalizing(EpochFinalizingAsyncEventArgs e)
+        await base.OnEpochFinalizingAsync(e);
+    }
+}
+```
+
+Use this when settlement behavior is intrinsic to the type.
+Here, the type *is a* timer and therefore owns the settlement boundary.
+
+---
+
+## Composition Model
+
+This snippet shows a scenario where `TextEntryModel` *has a* `WatchdogTimer`.
+
+```csharp
+class TextEntryModel : TextBox
+{
+    private readonly WatchdogTimer _wdt = new();
+
+    public TextEntryModel()
     {
-        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
+        _wdt.EpochFinalizing += (sender, e) =>
         {
-            // Add to FIFO of ordered awaitables to execute within the current epoch.
             e.QueueEpochTask(async () =>
-            { 
-                var acnx = await _dhost.GetCnx();
-                var recordset = await acnx.QueryAsync<Item>(
-                    "SELECT * FROM Item WHERE Description LIKE ?",
-                    $"%{InputText}%");
-                Items.Clear();
-                foreach (var item in recordset)
-                {
-                    Items.Add(item);
-                }
+            {
+                await SomeAsyncWork();
             });
-        }
+        };
     }
-    public void Dispose() => _dhost.Tokens.Single().Dispose();
 }
 ```
 
@@ -379,10 +258,55 @@ The mental model is simple:
 
 1. The synchronous `EpochFinalizing` event can be made to behave "just like" a subclass that overrides `OnEpochFinalizing`. 
 2. To extend the awaited epoch and perform work _inside that timeline_, queue the async workload inside the handler.
-___
+
+Important rules:
+
+- **The handler remains synchronous.**
+- You do not `await` inside the handler.
+- You register async work using `QueueEpochTask`.
+- Execution is FIFO and sequential.
+- Awaiting the timer resumes only after all queued tasks complete.
+
+---
+
+## Overridable Composition Model
+
+This snippet layers override semantics over composition, allowing simplified subclassing of the control.
+
+```csharp
+class TextEntryModel : TextBox
+{
+    private readonly WatchdogTimer _wdt = new();
+
+    public TextEntryModel()
+    {
+        _wdt.EpochFinalizing += (sender, e) =>
+            e.QueueEpochTask(() => OnEpochFinalizingAsync(e));
+    }
+
+    // Represents an ordered async workload participating in settlement.
+    protected virtual async Task OnEpochFinalizingAsync(
+        EpochFinalizingAsyncEventArgs e)
+    { 
+        await SomeAsyncWork(); // "Calls are taken in the order that they are received."
+    }
+}
+```
+
+> _If no asynchronous work is required, the override may return a completed task:_
+
+> `protected virtual Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e) 
+>    => Task.CompletedTask`
 
 
-## More Examples - From the Original Library
+The mental model:
+
+Bridges the eventing model, making it transparent to control subclasses.
+
+---
+
+
+## From the Archive: Examples That Came with the Original Library
 
 **Display an alert after user moves the mouse**
 

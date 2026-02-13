@@ -44,4 +44,9 @@ public class TestClass_ReadMeClaims
         await tcsSimStarted.Task;
         await wdt; // Await deterministic epoch settlement.
     }
+
+    [TestMethod]
+    public async Task Test_OverridableAsyncHook()
+    {
+    }
 }
