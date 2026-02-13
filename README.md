@@ -22,6 +22,7 @@ This loop is a simulation of a user typing "g-r-e-e-n" into an entry box. The go
 StringBuilder inputText = new();
 Stopwatch stopwatch = new(); // Measure epoch for test.
 
+// Fasttrack Ctor option with handler lambdas added inline.
 var wdt = new WatchdogTimer(
     defaultInitialAction: () => 
     { 
@@ -105,42 +106,45 @@ Awaiting provides a deterministic synchronization point. This is especially usef
 
 ## Example — Deterministic UI Settlement in a Unit Test
 
-This snippet demonstrates awaitability in a real-life setting. Note the additional accomodation: The `Task` that simulates the input is fire-and-forget (like real-life) but needs a chance to activate, and this is the rationale for the TCS.
+This example simulates a user typing five characters at realistic intervals. When no new character arrives within the configured interval, a single completion event is raised.
 
 ```
 [TestMethod]
 public async Task Test_SimpleDebounce()
 {
-    TaskCompletionSource tcsTaskStarted = new();
+    TaskCompletionSource tcsSimStarted = new(); // Will ensure that the test enters the simulation.
     StringBuilder inputText = new();
     Stopwatch stopwatch = new(); // Measure epoch for test.
     var wdt = new WatchdogTimer(
-        defaultInitialAction: () => 
-        { 
-            inputText.Clear();
+        defaultInitialAction: () =>
+        {
+            tcsSimStarted.TrySetResult();
             stopwatch.Restart();
-            tcsTaskStarted.TrySetResult();
-        }, 
-        defaultCompleteAction: () => 
-        { 
+        },
+        defaultCompleteAction: () =>
+        {
             Debug.WriteLine($"@{stopwatch.Elapsed.TotalSeconds} Settled Text: {inputText}");
         })
     {
         Interval = TimeSpan.FromSeconds(0.5)
     };
-    // Simulate keystrokes that would normally occur on the UI thread.        
+    // Simulate keystrokes that would normally occur on the UI thread.
+    // - Do not await here. This is just a burst of keystrokes in the wild.
     _ = Task.Run(async () =>
     {
-        foreach (var c in new[] { 'g', 'r', 'e', 'e', 'n'})
+        inputText.Clear();
+        foreach (var c in new[] { 'g', 'r', 'e', 'e', 'n' })
         {
             await Task.Delay(TimeSpan.FromSeconds(0.25));
-            wdt.StartOrRestart();
             inputText.Append(c);
+            wdt.StartOrRestart();
         }
     });
 
-    await tcsTaskStarted.Task;
-    await wdt;
+    // Without awaiting, this test would return immediately
+    // (the fire-and-forget input simulation may not execute at all).
+    await tcsSimStarted.Task;
+    await wdt; // Await deterministic epoch settlement.
 }
 ```
 ---
