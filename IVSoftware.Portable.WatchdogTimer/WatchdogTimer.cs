@@ -140,7 +140,7 @@ namespace IVSoftware.Portable
                         // Subclass organic virtual method.
                         await OnEpochFinalizingAsync(e);
 
-                        TaskStatus fifoStatus = e.IsCanceled ? TaskStatus.Canceled : TaskStatus.RanToCompletion;
+                        TaskStatus fifoStatus = e.Cancel ? TaskStatus.Canceled : TaskStatus.RanToCompletion;
                         if (fifoStatus == TaskStatus.RanToCompletion)
                         { 
                             // The fifo is now sealed.

@@ -14,7 +14,7 @@ Examples:
 
 ___
 
-## New Features in Release 1.3.1
+## New Features in Release 2.0.0
 
 1. Subclassing is streamlined through protected virtual lifecycle methods:
 
@@ -109,7 +109,7 @@ No noise. No swallowed exceptions.
 
 # Await Support (Optional but Powerful)
 
-Beginning with v1.3.1, `WatchdogTimer` is awaitable.
+Beginning with v2.0.0, `WatchdogTimer` is awaitable.
 
 ```csharp
 wdt.StartOrRestart();

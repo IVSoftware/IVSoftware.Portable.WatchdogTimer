@@ -43,7 +43,7 @@ namespace IVSoftware.Portable.MSTest.Models
 
         protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
         {
-            if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
+            if (!(e.Cancel || string.IsNullOrWhiteSpace(InputText)))
             {
                 var acnx = await _dhost.GetCnx();
                 var recordset = await acnx.QueryAsync<Item>(

@@ -40,7 +40,7 @@ namespace IVSoftware.Portable.MSTest.Models
 
         private void WDT_EpochFinalizing(EpochFinalizingAsyncEventArgs e)
         {
-            if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
+            if (!(e.Cancel || string.IsNullOrWhiteSpace(InputText)))
             {
                 // Add to FIFO of ordered awaitables to execute within the current epoch.
                 e.QueueEpochTask(async () =>

@@ -1,6 +1,7 @@
 ﻿using IVSoftware.Portable.Common.Exceptions;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Threading.Tasks;
 
 namespace IVSoftware.Portable
@@ -15,7 +16,7 @@ namespace IVSoftware.Portable
     /// - Upon return from the handler, this collection is sealed and tasks are consecutively 
     ///   awaited in the order they were received.
     /// </remarks>
-    public sealed class EpochFinalizingAsyncEventArgs : EventArgs
+    public sealed class EpochFinalizingAsyncEventArgs : CancelEventArgs
     {
         /// <summary>
         /// Initializes finalize arguments with a settled default.
@@ -23,12 +24,10 @@ namespace IVSoftware.Portable
         internal EpochFinalizingAsyncEventArgs(
             EpochFinalizationSnapshot snapshot)
         {
-            IsCanceled = snapshot.IsCanceled;
+            Cancel = snapshot.IsCanceled;
             TCS = snapshot.TCS;
             UserEventArgs = snapshot.UserEventArgs;
         }
-
-        public bool IsCanceled { get; }
 
         /// <summary>
         /// Adds an async workload to the finalization FIFO.
@@ -51,7 +50,7 @@ namespace IVSoftware.Portable
 
         #region D E P R E C A T E D 
 #if ABSTRACT
-            // From the documentation for 1.3.1-beta
+            // From the documentation for 2.0.0-beta
             await e.EpochInvokeAsync(async () =>
             { 
                 var acnx = await _dhost.GetCnx();
