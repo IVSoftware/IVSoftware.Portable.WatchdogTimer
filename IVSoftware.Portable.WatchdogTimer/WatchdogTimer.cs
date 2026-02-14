@@ -140,24 +140,31 @@ namespace IVSoftware.Portable
                         // Subclass organic virtual method.
                         await OnEpochFinalizingAsync(e);
 
-                        while (e.EpochFinalizeQueue.Count != 0)
-                        {
-                            await (e.EpochFinalizeQueue.Dequeue()).Invoke();
+                        TaskStatus fifoStatus = e.IsCanceled ? TaskStatus.Canceled : TaskStatus.RanToCompletion;
+                        if (fifoStatus == TaskStatus.RanToCompletion)
+                        { 
+                            // The fifo is now sealed.
+                            // If the consumer wishes to have in-flight cancellation
+                            // then they must provide their own CancellationTokens.
+                            while (e.EpochFinalizeQueue.Count != 0)
+                            {
+                                try
+                                {
+                                    await (e.EpochFinalizeQueue.Dequeue()).Invoke();
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    fifoStatus = TaskStatus.Canceled;
+                                    break;
+                                }
+                                catch
+                                {
+                                    fifoStatus = TaskStatus.Faulted;
+                                    break;
+                                }
+                            }
                         }
-                        e.TCS.TrySetResult(TaskStatus.RanToCompletion);
-
-                        // The event itself has no way of knowing when it's done.
-                        // That authority is on this line, but it wouldn't work to simply set 
-                        // the TCS without knowing which async tasks might be still running.
-                        // INSTEAD: 
-                        // We post the work of doing that at the end of the existing queue.
-                        // - This provides a way to be *sure* that the other tasks have been consecutively awaited.
-                        // - But it also explains why a handler that yields first (e.g. to some other await)
-                        //   and then tries to inject the queue using e.EpochInvokeAsync() will miss the boat.
-                        //await e.EpochInvokeAsync(async () =>
-                        //{
-                        //    e.TCS.TrySetResult(TaskStatus.RanToCompletion);
-                        //});
+                        e.TCS.TrySetResult(fifoStatus);
                     }
                 });
         }
