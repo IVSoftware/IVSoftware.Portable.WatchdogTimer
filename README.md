@@ -1,272 +1,312 @@
 # Watchdog Timer  [[GitHub](https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git)]
 
-`WatchdogTimer` is a restartable, debounce-style timer intended for UI and event-driven workflows where a single completion event represents a *settled state*. It triggers exactly once after the `TimeSpan` specified by the `Interval` property has elapsed since the most recent call to `StartOrRestart`, regardless of how many restarts occur during that interval. Calling `Cancel` suppresses completion for the current epoch.
+`WatchdogTimer` is a restartable debounce timer for UI and event-driven workflows. It triggers exactly once after the configured `Interval` has elapsed since the most recent call to `StartOrRestart`. Calling `Cancel` suppresses completion for the current cycle.
 
-A settled state refers to activity that must stop changing before a more expensive operation can safely proceed. UI interactions are a canonical example:
+A common use case is waiting for activity to *settle* before running expensive work.
+
+Examples:
 
 - Keystrokes and text changes produced by an IME
 - Mouse movement, including repeated entry and exit of a control boundary
 - Continuous list or viewport scrolling
+- File system change bursts
+- Hardware polling
 
+___
 
-> _An "epoch" is defined as the interval that begins when an idle WDT receives a start instruction (via the StartOrRestart method) and ends when the most-recent restart expires_
+## New Features in Release 1.3.1
 
+1. Subclassing is streamlined through protected virtual lifecycle methods:
+
+- `OnEpochInitialized()`
+- `OnRanToCompletion()`
+- `OnCanceled()`
+
+2. `WatchdogTimer` is awaitable. Developers may find this especially useful for testing their apps. 
+3. Optional advanced asynchronous epoch finalization via override:
+
+   `protected override Task OnEpochFinalizingAsync(
+        EpochFinalizingAsyncEventArgs e)`
 
 ___ 
 
-## Cancellation Without Exceptions
+## Level 1 — Simple Debounce (90% Use Case)
 
-This library is designed to avoid a common issue in the problem domain of restarting a running timer.
+This loop is a simulation of a user typing "g-r-e-e-n" into an entry box. The goal is to have one event when they're done.
 
-Many asynchronous designs extend an active epoch by canceling the current task and spawning a new one. While effective, this approach creates a noisy control-flow environment in which cancellation is reported by throwing `TaskCanceledException`, even though cancellation is not exceptional in a debouncing scenario. It is expected, frequent, and often the primary mechanism by which intermediate work is intentionally suppressed.
+```csharp
+StringBuilder inputText = new();
+Stopwatch stopwatch = new(); // Measure epoch for test.
 
-`WatchdogTimer` addresses this by separating cancellation *observation* from cancellation *exceptionality*.
+// Fasttrack Ctor option with handler lambdas added inline.
+var wdt = new WatchdogTimer(
+    defaultInitialAction: () => 
+    { 
+        inputText.Clear();
+        stopwatch.Restart(); 
+    }, 
+    defaultCompleteAction: () => 
+    { 
+        // Expecting ~
+        // 1.5574444S: Settled Text: green
+        Debug.WriteLine($"{stopwatch.Elapsed.TotalSeconds}S: Settled Text: {inputText}");
+    })
+{
+    Interval = TimeSpan.FromSeconds(0.5)
+};
 
-Rather than canceling in-flight delay tasks and spawning new ones, all scheduled delays are allowed to expire naturally. However, only the most recent interval (i.e. the `Interval` property `TimeSpan`) is allowed to commit. Earlier expirations are superseded and have no effect.
+// Simulate keystrokes that would normally occur on the UI thread.        
+_ = Task.Run(async () =>
+{
+    foreach (var c in new[] { 'g', 'r', 'e', 'e', 'n'})
+    {
+        await Task.Delay(TimeSpan.FromSeconds(0.25));
+        wdt.StartOrRestart();
+        inputText.Append(c);
+    }
+});
+```
 
-### Benefits
+This is working code, but if this were an actual unit test there would need to be an awaited delay - otherwise the test returns before having enough time to run. One possibility is to 'guess' and await a 2 second delay. What would be better is to "only wait for what you need" by having each **epoch** be _awaitable_. `WatchdogTimer` supports awaiting each epoch, eliminating the need for arbitrary delays.
 
-The WDT raises clean, actionable `RanToCompletion` or `Cancelled` events.
-
-- No `CancellationToken` usage
-- No canceled tasks
-- No exception-based control flow
-- No requirement to guard `await` calls with try/catch
-
-The same pattern applies to non-UI sources of activity, polling, or latency:
-
-- Synchronizing file system changes
-- Polling hardware data packets
+> _An "epoch" is defined as the interval that begins when an idle WDT receives a start instruction (via the StartOrRestart method) and ends when the most-recent restart expires_.
 
 ___
 
-## New Virtual Methods in this Release
+### What makes this different?
 
-Beginning with version 1.3.1, subclassing is facilitated by exposing lifecycle hooks through protected virtual methods:
+Many debounce implementations cancel active `Task.Delay` calls, producing `TaskCanceledException`.
 
-- OnEpochInitialized()
-- OnRanToCompletion()
-- OnCanceled()
+`WatchdogTimer` does **not** cancel in-flight delays.
+
+Instead:
+
+- All delays are allowed to complete naturally.
+- Only the most recent restart is allowed to commit.
+- Earlier expirations are ignored.
+
+This avoids:
+
+- `CancellationToken`
+- Canceled tasks
+- Exception-driven control flow
+- Defensive try/catch around await
+
+### Cancellation Without Exceptions
+
+Calling `Cancel()` suppresses the current epoch without throwing.
+
+You may subscribe to:
+
+```csharp
+wdt.Cancelled += ...
+wdt.RanToCompletion += ...
+```
+
+No noise. No swallowed exceptions.
 
 ---
 
-# New Added Features for Testing and Power User Applications
+# Await Support (Optional but Powerful)
 
-`WatchdogTimer` has always been simple to use and still is.
+Beginning with v1.3.1, `WatchdogTimer` is awaitable.
 
-The features that follow introduce awaitable behavior and structured epoch participation. These capabilities are intended for testing scenarios and advanced asynchronous workflows.
+```csharp
+wdt.StartOrRestart();
+await wdt;
+```
 
-If you only need a restartable debounce timer with `RanToCompletion` and `Cancelled` events, you can safely stop reading here. Everything above this point is the primary, straightforward usage model.
+Awaiting provides a deterministic synchronization point. This is especially useful in tests.
 
-The sections below describe a more powerful — and more opinionated — execution model.
+---
 
-___
+## Example — Deterministic UI Settlement in a Unit Test
 
-## Await Semantics
-
-Beginning with version 1.3.1, the `WatchdogTimer` (WDT) class may be awaited.
-
-At first glance, this can appear counterintuitive in an event-driven design. However, awaiting the WDT provides a well-defined synchronization point that is difficult to express using events alone.
-
-Common use cases include:
-
-- Test scenarios involving the WDT itself, or components that depend on it, where deterministic completion is required.
-- Atomic asynchronous workflows in which epoch settlement represents the start of a broader asynchronous operation rather than its conclusion.
-
-### Awaitable Workflow Example
-
-First, create an arbitrary `TextInputModel` class that inherits `WatchdogTimer` where any change to the `InputText` property kicks the WDT.
-
-Now, consider this unit testing scenario:
-
-1. The unit test starts by virtually typing into a text entry field.
-2. Each text change starts, or restarts, a settling interval.
-3. When quiescence signals that the simulated user has stopped typing, perform a query on an asynchronous SQLite connection.
-4. When execution resumes from the query, repopulate `Items` which is a bound observable collection.
-
-This unit test demonstrates how synchronous step #1 can be immediately awaited in the next line of code.
+This example simulates a user typing five characters at realistic intervals. When no new character arrives within the configured interval, a single completion event is raised.
 
 ```
 [TestMethod]
-public async Task Test_TextEntryModel()
+public async Task Test_SimpleDebounce()
 {
-    string actual, expected;
-    TextEntryModel entry = new();
-    entry.InputText = "hello";
-    await entry;
-    // SERIALIZE the items list to compare its contents to an expected JSON string.
-    actual = JsonConvert.SerializeObject(entry.Items);
-    expected = @"[{""Id"":1,""Description"":""Hello""}]";
-    Assert.AreEqual(expected.NormalizeResult(), actual.NormalizeResult(), "Expecting json to match." );
-}
-```
-
-___
-
-### Awaitable Override Semantics
-
-The `TextEntryModel` class performs this easily by overriding an awaitable method in the WDT base class:
-
-```
-protected virtual Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e, bool isCanceled) { }
-```
-
-The critical distinction is that this method runs _before_ the task completion source for the current epoch is set. So in this turnkey example class, the async database query runs within the epoch and allowing the `Items` list to be populated before signaling resume.
-
-
-### Awaitable by Inheritance Model
-
-In this model, the class itself *is* a `WatchdogTimer`. Epoch participation is expressed by overriding lifecycle hooks directly on the base class.
-
-This approach is appropriate when the type's identity and behavior are naturally centered around the timer itself, and when in-epoch work is an intrinsic responsibility of the class.
-
-
-```
-class TextEntryModel : WatchdogTimer, IDisposable
-{
-    public TextEntryModel()
+    TaskCompletionSource tcsSimStarted = new(); // Will ensure that the test enters the simulation.
+    StringBuilder inputText = new();
+    Stopwatch stopwatch = new(); // Measure epoch for test.
+    var wdt = new WatchdogTimer(
+        defaultInitialAction: () =>
+        {
+            tcsSimStarted.TrySetResult();
+            stopwatch.Restart();
+        },
+        defaultCompleteAction: () =>
+        {
+            Debug.WriteLine($"@{stopwatch.Elapsed.TotalSeconds} Settled Text: {inputText}");
+        })
     {
-        Interval = TimeSpan.FromSeconds(0.25);
-        _dhost.GetToken();
-    }
-
-    private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
+        Interval = TimeSpan.FromSeconds(0.5)
+    };
+    // Simulate keystrokes that would normally occur on the UI thread.
+    // - Do not await here. This is just a burst of keystrokes in the wild.
+    _ = Task.Run(async () =>
     {
-        await acnx.CreateTableAsync<Item>();
-        await acnx.InsertAsync(new Item { Description = "Hello" });
+        inputText.Clear();
+        foreach (var c in new[] { 'g', 'r', 'e', 'e', 'n' })
+        {
+            await Task.Delay(TimeSpan.FromSeconds(0.25));
+            inputText.Append(c);
+            wdt.StartOrRestart();
+        }
     });
 
-    public ObservableCollection<Item> Items { get; } = new();
-
-    public string InputText
-    {
-        get => _inputText;
-        set
-        {
-            if (!Equals(_inputText, value))
-            {
-                _inputText = value;
-                StartOrRestart();
-            }
-        }
-    }
-    string _inputText = string.Empty;
-
-    protected override async Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e)
-    {
-        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
-        {
-            var acnx = await _dhost.GetCnx();
-            var recordset = await acnx.QueryAsync<Item>(
-                "SELECT * FROM Item WHERE Description LIKE ?",
-                $"%{InputText}%");
-            Items.Clear();
-            foreach (var item in recordset)
-            {
-                Items.Add(item);
-            }
-        }
-        await base.OnEpochFinalizingAsync(e);
-    }
-
-    public void Dispose()=>_dhost.Tokens.Single().Dispose();
+    // Without awaiting, this test would return immediately
+    // (the fire-and-forget input simulation may not execute at all).
+    await tcsSimStarted.Task;
+    await wdt; // Await deterministic epoch settlement.
 }
 ```
+
+Eliminates the need for:
+
+- `Task.Delay`
+- Polling
+- Timing guesses
 
 ---
-### Awaitable by Composition Model
 
-The previous model *is a* `WatchdogTimer` through inheritance. In this model, a class *has a* `WatchdogTimer` instead. This approach is preferred when the timer is an implementation detail, or when the class already participates in another inheritance hierarchy.
+# Level 2 — Structured Async Coordination (Advanced)
 
-The model below achieves parity by subscribing to the `EpochFinalizing` event. In the body of its handle for the event, a call to `await EpochInvokeAsync(async () => { ... })` enqueues asynchronous work into a FIFO settlement queue. The epoch completes only after the queue drains.
+If you stop reading here, you already have a solid debounce timer.
 
-Event handlers themselves should remain synchronous. They should not await directly. Instead, they enqueue asynchronous participation through the event args. This preserves the notification semantics of the event while allowing structured, cooperative async work within the epoch boundary.
+Everything below this point is about coordinated async participation inside an epoch.
+
+---
+
+## The Concept of an Epoch
+
+An epoch begins when an idle `WatchdogTimer` receives `StartOrRestart`.
+
+It ends when the most recent restart completes its `Interval`.
 
 ```
-wdt.EpochFinalizing += (sender, e) =>
-{
-    // Fire and forget here, but legitimately awaited in the event class.
-    _ = e.EpochInvokeAsync(async () =>
-    {
-        // Any sequence of synchronous and asynchronous work - Not a problem!
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        Thread.Sleep(TimeSpan.FromSeconds(1));    
-        await Task.Delay(TimeSpan.FromSeconds(1));
-    });
-};
+Start
+-> [Restart, Restart...]
+-> Dwell Interval 
+-> Raise synchronous `RanToCompletion` event
+-> Execute asynchronous finalization (if any)
+-> Complete awaitable boundary
 ```
+
+**Example — Awaitable Epoch Boundary**
+
+Scenario: A text entry control triggers an asynchronous query after input settles.
+
+1. The user enters text.
+2. The settled value determines the SQL query.
+3. The query executes asynchronously.
+4. Await resumes only after the query completes.
 
 ___
 
-#### Example
+
+## Inheritance Model
+
+This snippet shows a scenario where `TextEntryModel` *is a* `WatchdogTimer`.
 
 ```csharp
-class TextEntryModelByComposition : IDisposable
+class TextEntryModel : WatchdogTimer
 {
-    public TextEntryModelByComposition()
+    protected override async Task OnEpochFinalizingAsync(
+        EpochFinalizingAsyncEventArgs e)
     {
-        _wdt.EpochFinalizing += (sender, e) => CommitEpoch(e);
-        _dhost.GetToken();
-    }
-
-    private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
-    {
-        await acnx.CreateTableAsync<Item>();
-        await acnx.InsertAsync(new Item { Description = "Hello" });
-    });
-
-    WatchdogTimer _wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
-    public TaskAwaiter<TaskStatus> GetAwaiter() => _wdt.GetAwaiter();
-
-    public ObservableCollection<Item> Items { get; } = new();
-
-    public string InputText
-    {
-        get => _inputText;
-        set
+        if (!e.IsCanceled)
         {
-            if (!Equals(_inputText, value))
-            {
-                _inputText = value;
-                _wdt.StartOrRestart();
-            }
+            // Async work here participates in settlement
         }
-    }
-    string _inputText = string.Empty;
 
-    private void CommitEpoch(EpochFinalizingAsyncEventArgs e)
-    {
-        if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
-        {
-            _ = e.EpochInvokeAsync(async () =>
-            { 
-                var acnx = await _dhost.GetCnx();
-                var recordset = await acnx.QueryAsync<Item>(
-                    "SELECT * FROM Item WHERE Description LIKE ?",
-                    $"%{InputText}%");
-                Items.Clear();
-                foreach (var item in recordset)
-                {
-                    Items.Add(item);
-                }
-            });
-        }
+        await base.OnEpochFinalizingAsync(e);
     }
-    public void Dispose() => _dhost.Tokens.Single().Dispose();
 }
 ```
 
-When used as directed, the mental model is simple:
+Use this when settlement behavior is intrinsic to the type.
+Here, the type *is a* timer and therefore owns the settlement boundary.
+
+---
+
+## Composition Model
+
+This snippet shows a scenario where `TextEntryModel` *has a* `WatchdogTimer`.
+
+```csharp
+class TextEntryModel : TextBox
+{
+    private readonly WatchdogTimer _wdt = new();
+
+    public TextEntryModel()
+    {
+        _wdt.EpochFinalizing += (sender, e) =>
+        {
+            e.QueueEpochTask(async () =>
+            {
+                await SomeAsyncWork();
+            });
+        };
+    }
+}
+```
+
+The mental model is simple:
 
 1. The synchronous `EpochFinalizing` event can be made to behave "just like" a subclass that overrides `OnEpochFinalizing`. 
-2. To extend the awaited epoch and perform work _inside that timeline_, make a call to `e.EpochInvokeAsync` immediately and exclusively within the handler.
+2. To extend the awaited epoch and perform work _inside that timeline_, queue the async workload inside the handler.
 
-Work performed outside that boundary is considered detached and will not delay awaiting callers.
+Important rules:
 
-___
+- **The handler remains synchronous.**
+- You do not `await` inside the handler.
+- You register async work using `QueueEpochTask`.
+- Execution is FIFO and sequential.
+- Awaiting the timer resumes only after all queued tasks complete.
+
+---
+
+## Overridable Composition Model
+
+This snippet layers override semantics over composition, allowing simplified subclassing of the control.
+
+```csharp
+class TextEntryModel : TextBox
+{
+    private readonly WatchdogTimer _wdt = new();
+
+    public TextEntryModel()
+    {
+        _wdt.EpochFinalizing += (sender, e) =>
+            e.QueueEpochTask(() => OnEpochFinalizingAsync(e));
+    }
+
+    // Represents an ordered async workload participating in settlement.
+    protected virtual async Task OnEpochFinalizingAsync(
+        EpochFinalizingAsyncEventArgs e)
+    { 
+        await SomeAsyncWork(); // "Calls are taken in the order that they are received."
+    }
+}
+```
+
+> _If no asynchronous work is required, the override may return a completed task:_
+
+> `protected virtual Task OnEpochFinalizingAsync(EpochFinalizingAsyncEventArgs e) 
+>    => Task.CompletedTask`
 
 
-## More Examples
+The mental model:
+
+Bridges the eventing model, making it transparent to control subclasses.
+
+---
+
+
+## From the Archive: Examples That Came with the Original Library
 
 **Display an alert after user moves the mouse**
 
@@ -545,31 +585,30 @@ public event PropertyChangedEventHandler PropertyChanged;
     - Consider using a singleton pattern to initialize using non-static properties of the instance.
 
 ```csharp
-
-        /// <summary>
-        /// Instantiate using singleton pattern.
-        /// </summary>
-        public WatchdogTimer WatchdogTimer
+/// <summary>
+/// Instantiate using singleton pattern.
+/// </summary>
+public WatchdogTimer WatchdogTimer
+{
+    get
+    {
+        if (_watchdogTimer is null)
         {
-            get
-            {
-                if (_watchdogTimer is null)
+            _watchdogTimer = new WatchdogTimer(
+                defaultInitialAction: () =>
                 {
-                    _watchdogTimer = new WatchdogTimer(
-                        defaultInitialAction: () =>
-                        {
-                            Console.WriteLine("Timer Started");
-                        },
-                        defaultCompleteAction: () =>
-                        {
-                            Console.WriteLine("Timer Completed");
-                        }
-                    );
+                    Console.WriteLine("Timer Started");
+                },
+                defaultCompleteAction: () =>
+                {
+                    Console.WriteLine("Timer Completed");
                 }
-                return _watchdogTimer;
-            }
+            );
         }
-        WatchdogTimer _watchdogTimer = default;
+        return _watchdogTimer;
+    }
+}
+WatchdogTimer _watchdogTimer = default;
 ```
 
 

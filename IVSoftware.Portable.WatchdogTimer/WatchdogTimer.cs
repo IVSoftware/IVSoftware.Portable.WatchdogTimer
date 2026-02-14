@@ -8,7 +8,9 @@ using System.Threading.Tasks;
 
 namespace IVSoftware.Portable
 {
-    public class WatchdogTimer : INotifyPropertyChanged
+    public class WatchdogTimer
+            : IAwaitableEpoch
+            , INotifyPropertyChanged
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="WatchdogTimer"/> class with optional default actions for the initial and completion phases.
@@ -105,11 +107,11 @@ namespace IVSoftware.Portable
                 InitializeEpoch();
                 OnEpochInitialized();
             }
-            if(completeAction is not null)
+            if (completeAction is not null)
             {
                 CompleteAction = completeAction;
             }
-            if(e is not null)
+            if (e is not null)
             {
                 UserEventArgs = e;
             }
@@ -138,18 +140,31 @@ namespace IVSoftware.Portable
                         // Subclass organic virtual method.
                         await OnEpochFinalizingAsync(e);
 
-                        // The event itself has no way of knowing when it's done.
-                        // That authority is on this line, but it wouldn't work to simply set 
-                        // the TCS without knowing which async tasks might be still running.
-                        // INSTEAD: 
-                        // We post the work of doing that at the end of the existing queue.
-                        // - This provides a way to be *sure* that the other tasks have been consecutively awaited.
-                        // - But it also explains why a handler that yields first (e.g. to some other await)
-                        //   and then tries to inject the queue using e.EpochInvokeAsync() will miss the boat.
-                        await e.EpochInvokeAsync(async () =>
-                        {
-                            e.TCS.TrySetResult(TaskStatus.RanToCompletion);
-                        });
+                        TaskStatus fifoStatus = e.IsCanceled ? TaskStatus.Canceled : TaskStatus.RanToCompletion;
+                        if (fifoStatus == TaskStatus.RanToCompletion)
+                        { 
+                            // The fifo is now sealed.
+                            // If the consumer wishes to have in-flight cancellation
+                            // then they must provide their own CancellationTokens.
+                            while (e.EpochFinalizeQueue.Count != 0)
+                            {
+                                try
+                                {
+                                    await (e.EpochFinalizeQueue.Dequeue()).Invoke();
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    fifoStatus = TaskStatus.Canceled;
+                                    break;
+                                }
+                                catch
+                                {
+                                    fifoStatus = TaskStatus.Faulted;
+                                    break;
+                                }
+                            }
+                        }
+                        e.TCS.TrySetResult(fifoStatus);
                     }
                 });
         }
@@ -197,7 +212,7 @@ namespace IVSoftware.Portable
         {
             Action completeAction;
             EventArgs eventArgs;
-            lock(_lock)
+            lock (_lock)
             {
                 Running = false; // Mark timer as no longer running
                 completeAction = CompleteAction ?? DefaultCompleteAction;
@@ -216,10 +231,10 @@ namespace IVSoftware.Portable
             Cancelled?.Invoke(this, EventArgs.Empty);
 
             var e = new EpochFinalizingAsyncEventArgs(TakeSnapshot(isCanceled: true));
-            OnEpochFinalizingAsync(e).GetAwaiter().OnCompleted(() => 
+            OnEpochFinalizingAsync(e).GetAwaiter().OnCompleted(() =>
             {
                 e.TCS.TrySetResult(TaskStatus.Canceled);
-            }); 
+            });
         }
         #endregion O V E R R I D E S
 

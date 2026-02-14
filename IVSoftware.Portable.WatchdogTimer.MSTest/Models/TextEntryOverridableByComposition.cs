@@ -4,14 +4,22 @@ using System.Runtime.CompilerServices;
 
 namespace IVSoftware.Portable.MSTest.Models
 {
-    class TextEntryModelByComposition 
+    class TextEntryOverridableByComposition
         : TextBox
         , IDisposable  // Encapsulates a disposable SQLiteAsyncConnection for test.
     {
-        public TextEntryModelByComposition()
+        public TextEntryOverridableByComposition()
         {
-            _wdt.EpochFinalizing +=  (sender, e) => WDT_EpochFinalizing(e);
+            _wdt.EpochFinalizing += (sender, e) =>
+            {
+                e.QueueEpochTask(() => OnEpochFinalizingAsync(e));
+            };
             _dhost.GetToken();
+        }
+        protected virtual async Task OnEpochFinalizingAsync(
+            EpochFinalizingAsyncEventArgs e)
+        {
+            // await SomeAsyncWork(); // "Calls are taken in the order that they are received."
         }
 
         private readonly DHostSQLiteAsyncConnection _dhost = new(async (acnx) =>
@@ -35,26 +43,6 @@ namespace IVSoftware.Portable.MSTest.Models
                     base.Text = value;
                     _wdt.StartOrRestart();
                 }
-            }
-        }
-
-        private void WDT_EpochFinalizing(EpochFinalizingAsyncEventArgs e)
-        {
-            if (!(e.IsCanceled || string.IsNullOrWhiteSpace(InputText)))
-            {
-                // Add to FIFO of ordered awaitables to execute within the current epoch.
-                e.QueueEpochTask(async () =>
-                { 
-                    var acnx = await _dhost.GetCnx();
-                    var recordset = await acnx.QueryAsync<Item>(
-                        "SELECT * FROM Item WHERE Description LIKE ?",
-                        $"%{InputText}%");
-                    Items.Clear();
-                    foreach (var item in recordset)
-                    {
-                        Items.Add(item);
-                    }
-                });
             }
         }
         public void Dispose() => _dhost.Tokens.Single().Dispose();

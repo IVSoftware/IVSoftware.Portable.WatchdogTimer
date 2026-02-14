@@ -1,14 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<Title>IVSoftware.Portable.WatchdogTimer</Title>
-		<Description>A lightweight, event-driven watchdog timer for .NET. Ideal for debouncing, deferred callbacks, and auto-reset behaviors. Avoids TaskCanceledException by design, with optional completion and cancellation events, and observable Running state via INotifyPropertyChanged.</Description>
+		<Description>A lightweight, restartable debounce timer for .NET. Designed for deterministic settlement in UI and event-driven workflows. Avoids TaskCanceledException by design and supports awaitable epochs for structured async coordination.</Description>
 		<TargetFramework>netstandard2.0</TargetFramework>
-		<PackageTags>watchdog;timer;debounce;async-compatible;event-driven;portable;netstandard;dotnet;cross-platform</PackageTags>
+		<PackageTags>
+			watchdog;timer;debounce;debouncing;awaitable;async;event-driven;mvvm;netstandard;dotnet;cross-platform
+		</PackageTags>
 		<RepositoryUrl>https://github.com/IVSoftware/IVSoftware.Portable.WatchdogTimer.git</RepositoryUrl>
 		<LangVersion>latest</LangVersion>
 		
 		<BaseVersion>1.3.1</BaseVersion>
-		<VersionPrefix>$(BaseVersion)-beta</VersionPrefix>
+		<VersionPrefix>$(BaseVersion)-rc</VersionPrefix>
 		
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<RootNamespace>IVSoftware.Portable</RootNamespace>

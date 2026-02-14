@@ -96,14 +96,13 @@ namespace IVSoftware.Portable.MSTest
         {
             var stopwatch = new Stopwatch(); 
             double expectedTimeout;
-            double expectedElapsed;
+            TimeSpan expectedElapsed;
             await subtestSingletonWithInitialAndComplete();
             
             async Task subtestSingletonWithInitialAndComplete()
             {
                 var uut = new SingletonWithInitialAndComplete();
                 expectedTimeout = uut.WDT.Interval.TotalSeconds;
-                expectedElapsed = 10 * 0.25 + expectedTimeout;
 
                 Assert.IsFalse(uut.WDT.Running);
 
@@ -115,7 +114,7 @@ namespace IVSoftware.Portable.MSTest
                     uut.EventQueue.DequeueSingleWDTTestEvent().WDTEventId,
                     "Expecting WDT to raise Initial event id.");
 
-                uut.WDT.ExecStartOrRestartLoop();
+                expectedElapsed = uut.WDT.ExecStartOrRestartLoop();
                 await uut;
                 stopwatch.Stop();
 
@@ -126,14 +125,14 @@ namespace IVSoftware.Portable.MSTest
                     uut.EventQueue.DequeueSingleWDTTestEvent().WDTEventId,
                     "Expecting WDT to raise Complete event id.");
 
-                var elapsed = stopwatch.Elapsed.TotalSeconds;
+                var elapsed = TimeSpan.FromSeconds(stopwatch.Elapsed.TotalSeconds);
 
                 // [Careful]
                 // Works only if you haven't paused the
                 // test (like with debug breakpoints).
                 Assert.IsTrue(
-                    elapsed > expectedElapsed - 0.5 && elapsed < expectedElapsed + 0.5,
-                    $"Elapsed time out of expected range: {elapsed:N2} sec");
+                    elapsed > expectedElapsed - TimeSpan.FromSeconds(0.5) && elapsed < expectedElapsed + TimeSpan.FromSeconds(0.5),
+                    $"Elapsed time out of expected range: {elapsed} sec");
 
                 Assert.AreEqual(2, uut.Toggle);
 
@@ -505,7 +504,7 @@ namespace IVSoftware.Portable.MSTest
             /// Connection point 1
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
                 });
@@ -513,7 +512,7 @@ namespace IVSoftware.Portable.MSTest
             /// Connection point 2
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
                 });
@@ -521,7 +520,7 @@ namespace IVSoftware.Portable.MSTest
 
             wdt.EpochFinalizing += async (sender, e) =>
             {
-                await e.EpochInvokeAsync(async () =>
+                e.QueueEpochTask(async () =>
                 {
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
                     await Task.Delay(TimeSpan.FromSeconds(0.1));
@@ -538,92 +537,6 @@ namespace IVSoftware.Portable.MSTest
             await Task.Delay(TimeSpan.FromSeconds(1)); // Propagate any errors now.
             Assert.AreEqual(0, eventQueue.Count, "Expecting no throws.");
         }
-
-        /// <summary>
-        /// Verifies structured epoch participation rules for <see cref="EpochInvokeAsync"/>.
-        /// </summary>
-        /// <remarks>
-        /// Each <see cref="EpochFinalizing"/> handler may invoke <see cref="EpochInvokeAsync"/>
-        /// at most once per logical participation boundary. Any combination of synchronous
-        /// or asynchronous work inside the supplied delegate is permitted.
-        /// 
-        /// Critical rule: the handler must not yield (i.e., execute an await) before calling
-        /// <see cref="EpochInvokeAsync"/>. Yielding before participation allows the epoch
-        /// to complete and causes late invocation to throw.
-        /// 
-        /// This test confirms:
-        /// 1. Mixed sync/async work inside EpochInvokeAsync prolongs the epoch correctly.
-        /// 2. A handler that yields before invoking EpochInvokeAsync is treated as a
-        ///    detached participant and results in an InvalidOperationException.
-        /// </remarks>
-        [TestMethod]
-        public async Task Test_PolicyLeak()
-        {
-            Stopwatch stopwatch = new();
-            Queue<SenderEventPair> eventQueue = new();
-            bool isPathologicalDetach = false;
-
-            #region L o c a l F x				
-            using var local = this.WithOnDispose(
-                onInit: (sender, e) =>
-                {
-                    Throw.BeginThrowOrAdvise += localOnBeginThrowOrAdvise;
-                },
-                onDispose: (sender, e) =>
-                {
-                    Throw.BeginThrowOrAdvise -= localOnBeginThrowOrAdvise;
-                });
-            void localOnBeginThrowOrAdvise(object? sender, EventArgs e)
-            {
-                eventQueue.Enqueue((sender, e));
-                if (e is Throw @throw)
-                {
-                    @throw.Handled = true;
-                }
-            }
-            #endregion L o c a l F x
-
-            var wdt = new WatchdogTimer { Interval = TimeSpan.FromSeconds(0.25) };
-            wdt.EpochFinalizing += async(sender, e) =>
-            {
-                if(isPathologicalDetach)
-                {
-                    await Task.Delay(TimeSpan.FromMilliseconds(1)); // Yields the awaiter.
-                }
-                await e.EpochInvokeAsync(async () =>
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(1)); // Not a problem!
-                    Thread.Sleep(TimeSpan.FromSeconds(1));     // Not a problem!
-                    await Task.Delay(TimeSpan.FromSeconds(1));
-                });
-            };
-            stopwatch.Restart();
-            wdt.StartOrRestart();
-            await wdt;
-            stopwatch.Stop();
-
-            Assert.IsTrue(stopwatch.Elapsed > TimeSpan.FromSeconds(3));
-            Assert.AreEqual(0, eventQueue.Count, "Expecting no throws.");
-
-            using (this.WithOnDispose(
-                onInit: (sender, e) =>
-                {
-                    isPathologicalDetach = true;
-                },
-                onDispose: (sender, e) =>
-                {
-                    isPathologicalDetach = false;
-                }))
-            {
-                stopwatch.Restart();
-                wdt.StartOrRestart();
-                await wdt;
-                stopwatch.Stop();
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(1)); // Propagate any "late hit" errors now.
-            Assert.AreEqual(1, eventQueue.Count, "Expecting Throw.");
-        }
     }
     class WDTTestEventArgs : EventArgs
     {
@@ -638,46 +551,5 @@ namespace IVSoftware.Portable.MSTest
     {
         Initial,
         Complete,
-    }
-    static class MSTestExtensions
-    {
-        public static void ExecStartOrRestartLoop(this WatchdogTimer @this, int loopN = 10, TimeSpan? delay = null)
-        {
-            delay ??= TimeSpan.FromSeconds(0.25);
-            _ = localStartOrRestart();
-            async Task localStartOrRestart()
-            {
-                for (int i = 0; i < loopN; i++)
-                {
-                    await Task.Delay((TimeSpan)delay);
-                    Assert.IsTrue(@this.Running);
-                    @this.StartOrRestart();
-                }
-            }
-        }
-        public static T DequeueSingle<T>(this Queue<T> queue)
-        {
-            switch (queue.Count)
-            {
-                case 0:
-                    throw new InvalidOperationException("Queue is empty.");
-                case 1:
-                    return queue.Dequeue();
-                default:
-                    throw new InvalidOperationException("Multiple items in queue.");
-            }
-        }
-        public static WDTTestEventArgs DequeueSingleWDTTestEvent(this Queue<SenderEventPair> queue)
-        {
-            switch (queue.Count)
-            {
-                case 0:
-                    throw new InvalidOperationException("Queue is empty.");
-                case 1:
-                    return (WDTTestEventArgs)queue.Dequeue().e;
-                default:
-                    throw new InvalidOperationException("Multiple items in queue.");
-            }
-        }
     }
 }
